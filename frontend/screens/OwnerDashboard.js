@@ -14,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   useWindowDimensions,
 } from "react-native";
+
 import { Calendar } from "react-native-calendars";
 import {
   collection,
@@ -27,6 +28,7 @@ import {
   orderBy,
   deleteDoc,
 } from "firebase/firestore";
+
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 import globalStyles from "../styles/global";
@@ -50,7 +52,9 @@ function normalizeHour(input) {
 }
 
 function timeToMin(hhmm) {
-  const [h, m] = String(hhmm || "0:0").split(":").map((x) => parseInt(x, 10));
+  const [h, m] = String(hhmm || "0:0")
+    .split(":")
+    .map((x) => parseInt(x, 10));
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
@@ -83,19 +87,19 @@ function parseHoursText(text) {
   return uniq;
 }
 
-// ✅ פורמט טיפולים + זמן כולל (תומך גם במבנה החדש "serviceType")
+// ✅ פורמט טיפולים + זמן כולל (תומך גם ב-serviceType)
 function formatServices(appOrReq) {
   const arr = Array.isArray(appOrReq?.servicesSelected) ? appOrReq.servicesSelected : [];
   const names = arr.map((s) => s?.name).filter(Boolean);
   const total = Number(appOrReq?.totalDurationMin || 0);
 
-  const servicesText = names.length ? names.join(", ") : (appOrReq?.serviceType || null);
+  const servicesText = names.length ? names.join(", ") : appOrReq?.serviceType || null;
   const totalText = total > 0 ? `${total} דק׳` : null;
 
   return { servicesText, totalText };
 }
 
-export default function OwnerDashboard() {
+export default function OwnerDashboard({ navigation }) {
   const { width } = useWindowDimensions();
 
   const responsiveFont = (base) => {
@@ -122,14 +126,14 @@ export default function OwnerDashboard() {
   // ✅ בקשות לתור
   const [requests, setRequests] = useState([]);
 
-  // ✅ תורים מאושרים בלבד (נציג רק "ראש" של קבוצה כדי לא לשכפל)
+  // ✅ תורים מאושרים בלבד
   const [appointments, setAppointments] = useState([]);
   const [usersMap, setUsersMap] = useState({});
 
-  // ✅ סימון ימים ביומן שיש בהם תורים/בקשות
+  // ✅ סימון ימים ביומן
   const [busyDaysMap, setBusyDaysMap] = useState({});
 
-  // ✅ טופס שריון ידני (מאושר מיד)
+  // ✅ טופס שריון ידני
   const [manualHour, setManualHour] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
@@ -167,6 +171,7 @@ export default function OwnerDashboard() {
 
   function confirmLogout() {
     if (Platform.OS === "web") {
+      // eslint-disable-next-line no-alert
       const ok = window.confirm("בטוחה שתרצי להתנתק?");
       if (ok) handleLogout();
       return;
@@ -265,8 +270,7 @@ export default function OwnerDashboard() {
     return () => unsub();
   }, [selectedDate]);
 
-  // ✅ תורים מאושרים לתאריך הנבחר (כולל תורים ידניים "approved")
-  // נציג רק ראשי קבוצות (isHead) או תורים ללא groupId
+  // ✅ תורים מאושרים לתאריך הנבחר
   useEffect(() => {
     if (showUsers) return;
 
@@ -468,7 +472,7 @@ export default function OwnerDashboard() {
     }
   }
 
-  // ✅ אישור בקשה (תומך slots): מעדכן את כל סלוטי הקבוצה ל-approved
+  // ✅ אישור בקשה (תומך slots)
   async function approveRequest(req) {
     const { id, date, hour, userId } = req;
 
@@ -539,7 +543,7 @@ export default function OwnerDashboard() {
     }
   }
 
-  // ✅ דחיית בקשה: מוחק slots pending ומסמן rejected
+  // ✅ דחיית בקשה
   async function rejectRequest(req) {
     const reqRef = doc(db, "appointmentRequests", req.id);
     const userResRef = doc(db, "userReservations", req.userId);
@@ -597,7 +601,7 @@ export default function OwnerDashboard() {
     }
   }
 
-  // ✅ ביטול תור מאושר ע"י בעלת העסק (תומך slots) + ניקוי userReservations
+  // ✅ ביטול תור מאושר
   async function ownerCancelAppointment(app) {
     const { docId, userId, date, hour } = app;
 
@@ -656,7 +660,7 @@ export default function OwnerDashboard() {
     ]);
   }
 
-  // ✅ שריון ידני: מאושר מיד + שומר כמו "ראש קבוצה"
+  // ✅ שריון ידני: מאושר מיד
   async function ownerCreateManualAppointment() {
     const hour = normalizeHour(manualHour);
     const name = manualName.trim();
@@ -720,16 +724,20 @@ export default function OwnerDashboard() {
   const MenuItem = ({ text, danger, onPress }) => (
     <Pressable
       onPress={onPress}
-      style={{
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: danger ? "#d33" : colors.border,
-        backgroundColor: "#fff",
-        marginTop: 10,
-        alignItems: "center",
-      }}
+      style={({ pressed }) => [
+        {
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          borderRadius: 12,
+          borderWidth: 1,
+          borderColor: danger ? "#d33" : colors.border,
+          backgroundColor: "#fff",
+          marginTop: 10,
+          alignItems: "center",
+          opacity: pressed ? 0.88 : 1,
+        },
+        Platform.OS === "web" ? { cursor: "pointer" } : null,
+      ]}
     >
       <Text style={{ fontWeight: "900", color: danger ? "#d33" : colors.textDark }}>{text}</Text>
     </Pressable>
@@ -738,13 +746,8 @@ export default function OwnerDashboard() {
   // ✅ markedDates: יום נבחר + נקודה סגולה בימים עם לקוחות
   const markedDates = useMemo(() => {
     const out = {};
-
     Object.keys(busyDaysMap || {}).forEach((d) => {
-      out[d] = {
-        ...(out[d] || {}),
-        marked: true,
-        dotColor: colors.primary,
-      };
+      out[d] = { ...(out[d] || {}), marked: true, dotColor: colors.primary };
     });
 
     out[selectedDate] = {
@@ -772,14 +775,18 @@ export default function OwnerDashboard() {
               Keyboard.dismiss();
               setShowUsers(false);
             }}
-            style={{
-              marginTop: 10,
-              alignSelf: "center",
-              backgroundColor: "#444",
-              paddingVertical: 8,
-              paddingHorizontal: 14,
-              borderRadius: 8,
-            }}
+            style={({ pressed }) => [
+              {
+                marginTop: 10,
+                alignSelf: "center",
+                backgroundColor: "#444",
+                paddingVertical: 8,
+                paddingHorizontal: 14,
+                borderRadius: 8,
+                opacity: pressed ? 0.88 : 1,
+              },
+              Platform.OS === "web" ? { cursor: "pointer" } : null,
+            ]}
           >
             <Text style={{ color: "white", fontWeight: "800" }}>חזרה למסך תורים</Text>
           </Pressable>
@@ -866,17 +873,20 @@ export default function OwnerDashboard() {
             <Pressable
               onPress={() => setMenuOpen(true)}
               hitSlop={{ top: 18, left: 18, right: 18, bottom: 18 }}
-              style={{
-                width: 46,
-                height: 46,
-                borderRadius: 14,
-                backgroundColor: "#fff",
-                borderWidth: 1,
-                borderColor: colors.border,
-                alignItems: "center",
-                justifyContent: "center",
-                ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
-              }}
+              style={({ pressed }) => [
+                {
+                  width: 46,
+                  height: 46,
+                  borderRadius: 14,
+                  backgroundColor: "#fff",
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: pressed ? 0.88 : 1,
+                },
+                Platform.OS === "web" ? { cursor: "pointer" } : null,
+              ]}
             >
               <View style={{ width: 18, height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
               <View style={{ width: 18, height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
@@ -890,16 +900,73 @@ export default function OwnerDashboard() {
           <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
             <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18 }}>
               <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={{ marginTop: 70, alignSelf: "flex-end", width: 240, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14 }}>
+                <View
+                  style={{
+                    marginTop: 70,
+                    alignSelf: "flex-end",
+                    width: 240,
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                  }}
+                >
                   <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(16), textAlign: "center" }}>
                     תפריט
                   </Text>
 
-                  <MenuItem text="הגדרת ברירת מחדל" onPress={() => { setMenuOpen(false); Keyboard.dismiss(); setDefaultModalOpen(true); }} />
-                  <MenuItem text="שעות לתאריך ספציפי" onPress={() => { setMenuOpen(false); Keyboard.dismiss(); setAvailabilityModalOpen(true); }} />
-                  <MenuItem text="שריון ידני ללקוחה" onPress={() => { setMenuOpen(false); Keyboard.dismiss(); setManualModalOpen(true); }} />
-                  <MenuItem text="לקוחות פעילים" onPress={() => { setMenuOpen(false); Keyboard.dismiss(); setShowUsers(true); }} />
-                  <MenuItem text="התנתקות" danger onPress={() => { setMenuOpen(false); confirmLogout(); }} />
+                  <MenuItem
+                    text="הגדרת ברירת מחדל"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setDefaultModalOpen(true);
+                    }}
+                  />
+                  <MenuItem
+                    text="שעות לתאריך ספציפי"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setAvailabilityModalOpen(true);
+                    }}
+                  />
+                  <MenuItem
+                    text="שריון ידני ללקוחה"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setManualModalOpen(true);
+                    }}
+                  />
+
+                  {/* ✅ כפתור מעבר למסך דף העסק */}
+                  <MenuItem
+                    text="דף העסק (עריכה)"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      navigation.navigate("BusinessHomeOwner");
+                    }}
+                  />
+
+                  <MenuItem
+                    text="לקוחות פעילים"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setShowUsers(true);
+                    }}
+                  />
+                  <MenuItem
+                    text="התנתקות"
+                    danger
+                    onPress={() => {
+                      setMenuOpen(false);
+                      confirmLogout();
+                    }}
+                  />
                   <MenuItem text="סגור" onPress={() => setMenuOpen(false)} />
                 </View>
               </TouchableWithoutFeedback>
@@ -931,11 +998,23 @@ export default function OwnerDashboard() {
                     style={[globalStyles.input, { marginTop: 10, minHeight: 140, textAlign: "left", writingDirection: "ltr", paddingTop: 12 }]}
                   />
 
-                  <Pressable onPress={saveDefaultHours} style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12 }}>
+                  <Pressable
+                    onPress={saveDefaultHours}
+                    style={({ pressed }) => [
+                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>שמור ברירת מחדל</Text>
                   </Pressable>
 
-                  <Pressable onPress={() => setDefaultModalOpen(false)} style={{ backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10 }}>
+                  <Pressable
+                    onPress={() => setDefaultModalOpen(false)}
+                    style={({ pressed }) => [
+                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
                   </Pressable>
                 </View>
@@ -967,7 +1046,13 @@ export default function OwnerDashboard() {
                     style={[globalStyles.input, { marginTop: 10, minHeight: 140, textAlign: "left", writingDirection: "ltr", paddingTop: 12 }]}
                   />
 
-                  <Pressable onPress={saveAvailabilityForDate} style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12 }}>
+                  <Pressable
+                    onPress={saveAvailabilityForDate}
+                    style={({ pressed }) => [
+                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>שמור שעות לתאריך</Text>
                   </Pressable>
 
@@ -982,12 +1067,21 @@ export default function OwnerDashboard() {
                         { text: "אפס", style: "destructive", onPress: resetAvailabilityForDate },
                       ]);
                     }}
-                    style={{ backgroundColor: "#fff", borderWidth: 1, borderColor: "#d33", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10 }}
+                    style={({ pressed }) => [
+                      { backgroundColor: "#fff", borderWidth: 1, borderColor: "#d33", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
                   >
                     <Text style={{ color: "#d33", fontWeight: "900" }}>איפוס תאריך לברירת מחדל</Text>
                   </Pressable>
 
-                  <Pressable onPress={() => setAvailabilityModalOpen(false)} style={{ backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10 }}>
+                  <Pressable
+                    onPress={() => setAvailabilityModalOpen(false)}
+                    style={({ pressed }) => [
+                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
                   </Pressable>
                 </View>
@@ -1047,17 +1141,32 @@ export default function OwnerDashboard() {
                   {Platform.OS === "android" && phoneFocused && keyboardVisible ? (
                     <Pressable
                       onPress={Keyboard.dismiss}
-                      style={{ alignSelf: "flex-end", backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, marginTop: 10 }}
+                      style={({ pressed }) => [
+                        { alignSelf: "flex-end", backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      ]}
                     >
                       <Text style={{ color: "white", fontWeight: "900" }}>סיום</Text>
                     </Pressable>
                   ) : null}
 
-                  <Pressable onPress={ownerCreateManualAppointment} style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12 }}>
+                  <Pressable
+                    onPress={ownerCreateManualAppointment}
+                    style={({ pressed }) => [
+                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>שמור תור</Text>
                   </Pressable>
 
-                  <Pressable onPress={() => setManualModalOpen(false)} style={{ backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10 }}>
+                  <Pressable
+                    onPress={() => setManualModalOpen(false)}
+                    style={({ pressed }) => [
+                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
                     <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
                   </Pressable>
                 </View>
@@ -1066,6 +1175,7 @@ export default function OwnerDashboard() {
           </TouchableWithoutFeedback>
         </Modal>
 
+        {/* iOS accessory */}
         {Platform.OS === "ios" ? (
           <InputAccessoryView nativeID={phoneAccessoryId}>
             <View style={{ backgroundColor: "#f2f2f2", borderTopWidth: 1, borderTopColor: "#ddd", paddingVertical: 8, paddingHorizontal: 12, alignItems: "flex-end" }}>
@@ -1108,16 +1218,11 @@ export default function OwnerDashboard() {
               const { servicesText, totalText } = formatServices(r);
 
               return (
-                <View
-                  key={r.id}
-                  style={{ marginTop: 10, backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12 }}
-                >
+                <View key={r.id} style={{ marginTop: 10, backgroundColor: "#fff", borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
                   <Text style={{ fontWeight: "900", textAlign: "right" }}>שעה: {r.hour}</Text>
                   <Text style={{ marginTop: 4, textAlign: "right" }}>לקוחה: {fullName}</Text>
 
-                  <Text style={{ marginTop: 4, textAlign: "right" }}>
-                    טיפול: {servicesText || "לא נבחר"}
-                  </Text>
+                  <Text style={{ marginTop: 4, textAlign: "right" }}>טיפול: {servicesText || "לא נבחר"}</Text>
                   <Text style={{ marginTop: 2, textAlign: "right", fontWeight: "900", color: "#555" }}>
                     זמן כולל: {totalText || "—"}
                   </Text>

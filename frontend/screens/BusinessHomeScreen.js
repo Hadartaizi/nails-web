@@ -32,18 +32,6 @@ import { auth, db } from "../firebaseConfig";
 import globalStyles from "../styles/global";
 import colors from "../styles/colors";
 
-// ================== CONFIG ==================
-const BUSINESS = {
-  businessName: "ROTEM_NAILS_STUDIO",
-  ownerName: "רותם בן צבי",
-
-  phoneDial: "0547916054",
-  phoneInternational: "972547916054",
-
-  instagramHandle: "rotem_nails_studio",
-  wazeAddress: "מגן",
-};
-
 // ================== ASSETS ==================
 const LOGO = require("../assets/businessLogo.jpg");
 const whatsappLogo = require("../assets/whatsappLogo.png");
@@ -61,6 +49,7 @@ const NAILS_GALLERY = [
 // ================== helpers ==================
 async function openUrl(url) {
   try {
+    if (!url) return;
     const supported = await Linking.canOpenURL(url);
     if (!supported) {
       Alert.alert("לא ניתן לפתוח", "המכשיר לא תומך בקישור הזה.");
@@ -157,24 +146,84 @@ function SectionTitle({ children }) {
   );
 }
 
+// ✅ חשוב: לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u; // ✅ data URL נשאר כמו שהוא
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
+
 // ================== screen ==================
 export default function BusinessHomeScreen({ navigation }) {
   const userId = auth.currentUser?.uid || null;
 
-  const links = useMemo(() => {
-    const wa = `https://wa.me/${BUSINESS.phoneInternational}`;
-    const tel = `tel:${BUSINESS.phoneDial}`;
-    const igWeb = `https://instagram.com/${BUSINESS.instagramHandle}`;
-    const igDeep = `instagram://user?username=${BUSINESS.instagramHandle}`;
-    const waze = `https://waze.com/ul?q=${encodeURIComponent(BUSINESS.wazeAddress)}&navigate=yes`;
-    return { wa, tel, igWeb, igDeep, waze };
+  // ====== Business profile (from Firestore) ======
+  const [business, setBusiness] = useState(null);
+
+  useEffect(() => {
+    const ref = doc(db, "business", "profile");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => setBusiness(snap.exists() ? snap.data() : null),
+      (err) => {
+        console.log("❌ business/profile listen error:", err?.code, err?.message);
+        setBusiness(null);
+      }
+    );
+    return () => unsub();
   }, []);
+
+  const b = business || {};
+
+  const links = useMemo(() => {
+    const wa = b.phoneInternational ? `https://wa.me/${b.phoneInternational}` : null;
+    const tel = b.phoneDial ? `tel:${b.phoneDial}` : null;
+
+    const igWeb = b.instagramHandle ? `https://instagram.com/${b.instagramHandle}` : null;
+    const igDeep = b.instagramHandle ? `instagram://user?username=${b.instagramHandle}` : null;
+
+    const waze = b.wazeAddress
+      ? `https://waze.com/ul?q=${encodeURIComponent(b.wazeAddress)}&navigate=yes`
+      : null;
+
+    return { wa, tel, igWeb, igDeep, waze };
+  }, [b.phoneInternational, b.phoneDial, b.instagramHandle, b.wazeAddress]);
+
+  // ====== Gallery (Firestore: business/galleryMain) ======
+  const [gallery, setGallery] = useState([]);
+  const [galleryLoading, setGalleryLoading] = useState(true);
+  const [galleryUpdatedAt, setGalleryUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    const ref = doc(db, "business", "galleryMain");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.exists() ? snap.data() : null;
+        const imgs = Array.isArray(data?.images) ? data.images : [];
+        setGallery(imgs);
+        setGalleryUpdatedAt(Date.now()); // ✅ מאלץ רינדור אחרי שינוי
+        setGalleryLoading(false);
+      },
+      (err) => {
+        console.log("❌ galleryMain listen error:", err?.code, err?.message);
+        setGallery([]);
+        setGalleryUpdatedAt(Date.now());
+        setGalleryLoading(false);
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  const hasUploaded = Array.isArray(gallery) && gallery.length > 0;
 
   // ========= Reviews =========
   const [reviews, setReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
 
-  // “הביקורת שלי” (אם קיימת)
+  // “הביקורת שלי”
   const [myExistingReview, setMyExistingReview] = useState(null);
 
   // modal
@@ -183,18 +232,15 @@ export default function BusinessHomeScreen({ navigation }) {
   const [myText, setMyText] = useState("");
   const [savingReview, setSavingReview] = useState(false);
 
-  // listen reviews realtime
   useEffect(() => {
-    const q = query(collection(db, "reviews"), orderBy("updatedAt", "desc"), limit(50));
-
+    const q1 = query(collection(db, "reviews"), orderBy("updatedAt", "desc"), limit(50));
     const unsub = onSnapshot(
-      q,
+      q1,
       (snap) => {
         const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setReviews(arr);
         setReviewsLoading(false);
 
-        // לעדכן מצב "הביקורת שלי" מהרשימה (נוח)
         if (userId) {
           const mine = arr.find((x) => x.userId === userId || x.id === userId) || null;
           setMyExistingReview(mine);
@@ -243,23 +289,18 @@ export default function BusinessHomeScreen({ navigation }) {
 
     setSavingReview(true);
     try {
-      // שם משתמש
       let userName = "לקוחה";
       try {
         const uSnap = await getDoc(doc(db, "users", userId));
         if (uSnap.exists()) {
           const u = uSnap.data();
-          const full =
-            `${u?.firstName || ""} ${u?.lastName || ""}`.trim() ||
-            u?.displayName ||
-            u?.name;
+          const full = `${u?.firstName || ""} ${u?.lastName || ""}`.trim() || u?.displayName || u?.name;
           if (full) userName = full;
         }
       } catch (e) {
         console.log("user name read error:", e?.message || e);
       }
 
-      // ✅ ביקורת אחת לכל משתמש: reviews/{userId}
       const reviewRef = doc(db, "reviews", userId);
 
       await setDoc(
@@ -311,7 +352,7 @@ export default function BusinessHomeScreen({ navigation }) {
     <View style={[globalStyles.container, { backgroundColor: "transparent" }]}>
       <ScrollView
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: 28 }}
+        contentContainerStyle={{ paddingBottom: 110 }} // ✅ מקום לכפתור התחתון
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -328,31 +369,12 @@ export default function BusinessHomeScreen({ navigation }) {
           <Image source={LOGO} style={{ width: 96, height: 96, borderRadius: 18 }} resizeMode="cover" />
 
           <Text style={{ marginTop: 10, fontSize: 22, fontWeight: "900", color: colors.primary, textAlign: "center" }}>
-            {BUSINESS.businessName}
+            {b.businessName || "העסק שלי"}
           </Text>
 
           <Text style={{ marginTop: 6, fontSize: 15, fontWeight: "800", color: colors.textDark, textAlign: "center" }}>
-            בעלת העסק: {BUSINESS.ownerName}
+            בעלת העסק: {b.ownerName || "—"}
           </Text>
-
-          <Pressable
-            onPress={() => navigation.navigate("Calendar")}
-            style={({ pressed }) => [
-              {
-                marginTop: 14,
-                backgroundColor: colors.primary,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: 12,
-                width: "100%",
-                alignItems: "center",
-                opacity: pressed ? 0.88 : 1,
-              },
-              Platform.OS === "web" ? { cursor: "pointer" } : null,
-            ]}
-          >
-            <Text style={{ color: "#fff", fontWeight: "900" }}>מעבר לקביעת תור</Text>
-          </Pressable>
         </View>
 
         {/* Actions */}
@@ -360,66 +382,65 @@ export default function BusinessHomeScreen({ navigation }) {
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           <ActionCard title="וואטסאפ" subtitle="פתיחת צ'אט" icon={whatsappLogo} onPress={() => openUrl(links.wa)} />
-          <ActionCard title="טלפון" subtitle={BUSINESS.phoneDial} icon={phoneLogo} onPress={() => openUrl(links.tel)} />
+          <ActionCard title="טלפון" subtitle={b.phoneDial || "—"} icon={phoneLogo} onPress={() => openUrl(links.tel)} />
         </View>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           <ActionCard
             title="אינסטגרם"
-            subtitle={`@${BUSINESS.instagramHandle}`}
+            subtitle={b.instagramHandle ? `@${b.instagramHandle}` : "—"}
             icon={instagramLogo}
             onPress={async () => {
-              const canDeep = await Linking.canOpenURL(links.igDeep);
+              if (!links.igWeb) return;
+              const canDeep = links.igDeep ? await Linking.canOpenURL(links.igDeep) : false;
               await openUrl(canDeep ? links.igDeep : links.igWeb);
             }}
           />
           <ActionCard title="Waze" subtitle="ניווט" icon={wazeLogo} onPress={() => openUrl(links.waze)} />
         </View>
 
-        {/* Gallery */}
+        {/* ✅ Gallery (Firestore) */}
         <SectionTitle>גלריה</SectionTitle>
-        <View
-          style={{
-            marginTop: 10,
-            backgroundColor: "#fff",
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: colors.border,
-            padding: 12,
-          }}
-        >
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              {NAILS_GALLERY.map((src, idx) => (
-                <Image key={idx} source={src} style={{ width: 160, height: 160, borderRadius: 14 }} resizeMode="cover" />
-              ))}
-            </View>
-          </ScrollView>
+        <View style={{ marginTop: 10, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
+          {galleryLoading ? (
+            <Text style={{ textAlign: "right", color: "gray", fontWeight: "700" }}>טוען גלריה…</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                {hasUploaded
+                  ? gallery.map((img) => (
+                      <Image
+                        key={`${img.id}_${galleryUpdatedAt}`}
+                        source={{ uri: normalizeImgUri(img.dataUrl, galleryUpdatedAt) }}
+                        style={{ width: 160, height: 160, borderRadius: 14, backgroundColor: "#f2f2f2" }}
+                        resizeMode="cover"
+                      />
+                    ))
+                  : NAILS_GALLERY.map((src, idx) => (
+                      <Image key={idx} source={src} style={{ width: 160, height: 160, borderRadius: 14 }} resizeMode="cover" />
+                    ))}
+              </View>
+            </ScrollView>
+          )}
+
+          {!galleryLoading && hasUploaded ? (
+            <Text style={{ marginTop: 10, textAlign: "right", color: "#777", fontWeight: "700", fontSize: 12 }}>
+              התמונות נטענות מהגלריה של העסק.
+            </Text>
+          ) : null}
         </View>
 
         {/* Reviews */}
         <SectionTitle>ביקורות</SectionTitle>
 
-        {/* כפתורים לביקורת שלי */}
         {!userId ? (
-          <Text style={{ marginTop: 10, textAlign: "right", color: "#666", fontWeight: "700" }}>
-            כדי לכתוב ביקורת צריך להתחבר.
-          </Text>
+          <Text style={{ marginTop: 10, textAlign: "right", color: "#666", fontWeight: "700" }}>כדי לכתוב ביקורת צריך להתחבר.</Text>
         ) : myExistingReview ? (
           <View style={{ marginTop: 10, flexDirection: "row", gap: 10 }}>
             <Pressable
               onPress={() => openReviewModal("edit")}
               style={({ pressed }) => [
-                {
-                  flex: 1,
-                  backgroundColor: "#fff",
-                  borderWidth: 1,
-                  borderColor: colors.primary,
-                  borderRadius: 14,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                  opacity: pressed ? 0.88 : 1,
-                },
+                { flex: 1, backgroundColor: "#fff", borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
                 Platform.OS === "web" ? { cursor: "pointer" } : null,
               ]}
             >
@@ -429,16 +450,7 @@ export default function BusinessHomeScreen({ navigation }) {
             <Pressable
               onPress={deleteMyReview}
               style={({ pressed }) => [
-                {
-                  flex: 1,
-                  backgroundColor: "#fff",
-                  borderWidth: 1,
-                  borderColor: "#c62828",
-                  borderRadius: 14,
-                  paddingVertical: 12,
-                  alignItems: "center",
-                  opacity: pressed ? 0.88 : 1,
-                },
+                { flex: 1, backgroundColor: "#fff", borderWidth: 1, borderColor: "#c62828", borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
                 Platform.OS === "web" ? { cursor: "pointer" } : null,
               ]}
             >
@@ -449,16 +461,7 @@ export default function BusinessHomeScreen({ navigation }) {
           <Pressable
             onPress={() => openReviewModal("new")}
             style={({ pressed }) => [
-              {
-                marginTop: 10,
-                backgroundColor: "#fff",
-                borderWidth: 1,
-                borderColor: colors.primary,
-                borderRadius: 14,
-                paddingVertical: 12,
-                alignItems: "center",
-                opacity: pressed ? 0.88 : 1,
-              },
+              { marginTop: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
               Platform.OS === "web" ? { cursor: "pointer" } : null,
             ]}
           >
@@ -466,7 +469,6 @@ export default function BusinessHomeScreen({ navigation }) {
           </Pressable>
         )}
 
-        {/* רשימת ביקורות */}
         <View style={{ marginTop: 10 }}>
           {reviewsLoading ? (
             <Text style={{ textAlign: "right", color: "gray" }}>טוען ביקורות…</Text>
@@ -498,11 +500,8 @@ export default function BusinessHomeScreen({ navigation }) {
                   {String(r.text || "")}
                 </Text>
 
-                {/* סימון "שלי" */}
-                {(userId && (r.userId === userId || r.id === userId)) ? (
-                  <Text style={{ marginTop: 6, color: colors.primary, fontWeight: "900" }}>
-                    הביקורת שלי
-                  </Text>
+                {userId && (r.userId === userId || r.id === userId) ? (
+                  <Text style={{ marginTop: 6, color: colors.primary, fontWeight: "900" }}>הביקורת שלי</Text>
                 ) : null}
               </View>
             ))
@@ -514,6 +513,36 @@ export default function BusinessHomeScreen({ navigation }) {
         </Text>
       </ScrollView>
 
+      {/* ✅ כפתור תחתון קבוע למסך קביעת תור */}
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          padding: 14,
+          backgroundColor: "rgba(255,255,255,0.96)",
+          borderTopWidth: 1,
+          borderTopColor: colors.border,
+        }}
+      >
+        <Pressable
+          onPress={() => navigation.navigate("Calendar")} // ✅ נכון לפי AppNavigator
+          style={({ pressed }) => [
+            {
+              backgroundColor: colors.primary,
+              paddingVertical: 14,
+              borderRadius: 14,
+              alignItems: "center",
+              opacity: pressed ? 0.88 : 1,
+            },
+            Platform.OS === "web" ? { cursor: "pointer" } : null,
+          ]}
+        >
+          <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>מעבר לקביעת תור 📅</Text>
+        </Pressable>
+      </View>
+
       {/* ===== MODAL: כתיבה/עריכה ===== */}
       <Modal visible={reviewModalOpen} transparent animationType="fade" onRequestClose={() => setReviewModalOpen(false)}>
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -524,17 +553,13 @@ export default function BusinessHomeScreen({ navigation }) {
                   {myExistingReview ? "עריכת ביקורת" : "כתיבת ביקורת"}
                 </Text>
 
-                <Text style={{ marginTop: 10, fontWeight: "800", textAlign: "right" }}>
-                  דירוג:
-                </Text>
+                <Text style={{ marginTop: 10, fontWeight: "800", textAlign: "right" }}>דירוג:</Text>
 
                 <View style={{ marginTop: 8, alignItems: "flex-end" }}>
                   <StarsRow rating={myRating} onChange={setMyRating} size={26} />
                 </View>
 
-                <Text style={{ marginTop: 12, fontWeight: "800", textAlign: "right" }}>
-                  טקסט:
-                </Text>
+                <Text style={{ marginTop: 12, fontWeight: "800", textAlign: "right" }}>טקסט:</Text>
 
                 <TextInput
                   value={myText}
@@ -562,15 +587,7 @@ export default function BusinessHomeScreen({ navigation }) {
                     onPress={() => setReviewModalOpen(false)}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      {
-                        flex: 1,
-                        paddingVertical: 12,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: "#bbb",
-                        alignItems: "center",
-                        opacity: pressed ? 0.88 : 1,
-                      },
+                      { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#bbb", alignItems: "center", opacity: pressed ? 0.88 : 1 },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
@@ -581,44 +598,24 @@ export default function BusinessHomeScreen({ navigation }) {
                     onPress={saveReview}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      {
-                        flex: 1,
-                        paddingVertical: 12,
-                        borderRadius: 12,
-                        backgroundColor: colors.primary,
-                        alignItems: "center",
-                        opacity: savingReview ? 0.6 : pressed ? 0.88 : 1,
-                      },
+                      { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: colors.primary, alignItems: "center", opacity: savingReview ? 0.6 : pressed ? 0.88 : 1 },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
-                    <Text style={{ fontWeight: "900", color: "#fff" }}>
-                      {savingReview ? "שומר..." : "שמירה"}
-                    </Text>
+                    <Text style={{ fontWeight: "900", color: "#fff" }}>{savingReview ? "שומר..." : "שמירה"}</Text>
                   </Pressable>
                 </View>
 
-                {/* כפתור מחיקה גם בתוך מודאל, אם יש ביקורת קיימת */}
                 {userId && myExistingReview ? (
                   <Pressable
                     onPress={deleteMyReview}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      {
-                        marginTop: 10,
-                        paddingVertical: 12,
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: "#c62828",
-                        alignItems: "center",
-                        opacity: pressed ? 0.88 : 1,
-                      },
+                      { marginTop: 10, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#c62828", alignItems: "center", opacity: pressed ? 0.88 : 1 },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
-                    <Text style={{ fontWeight: "900", color: "#c62828" }}>
-                      מחיקת ביקורת
-                    </Text>
+                    <Text style={{ fontWeight: "900", color: "#c62828" }}>מחיקת ביקורת</Text>
                   </Pressable>
                 ) : null}
               </View>

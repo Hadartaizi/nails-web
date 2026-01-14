@@ -117,7 +117,7 @@ export default function LoginScreen({ navigation }) {
         <Text style={styles.buttonText}>{busy ? "מתחבר..." : "התחבר"}</Text>
       </Pressable>
 
-      <Pressable onPress={() => navigation.navigate("Registration")}>
+      <Pressable onPress={() => navigation.navigate("Register")}>
         <Text style={styles.loginLink}>עדיין לא רשום/ה? הירשם/י כאן</Text>
       </Pressable>
     </View>

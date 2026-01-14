@@ -1,5 +1,6 @@
+// frontend/navigation/AppNavigator.js
 import React, { useEffect, useState } from "react";
-import { View, ActivityIndicator } from "react-native";
+import { View, ActivityIndicator, Text } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
@@ -19,80 +20,75 @@ import PricesScreen from "../screens/PricesScreen";
 
 // Owner
 import OwnerDashboard from "../screens/OwnerDashboard";
+import BusinessHomeOwnerScreen from "../screens/BusinessHomeOwnerScreen"; // ✅ חדש
 
 const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
-  const [initializing, setInitializing] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null); // "owner" | "customer"
+  const [role, setRole] = useState(null);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
 
-      if (!u?.uid) {
+      // לא מחובר
+      if (!u) {
         setRole(null);
-        setInitializing(false);
+        setLoading(false);
         return;
       }
 
+      // מחובר => מביא role מה-users/{uid}
       try {
         const snap = await getDoc(doc(db, "users", u.uid));
         const r = snap.exists() ? snap.data()?.role : null;
-
-        // רק owner מפורש ייחשב owner
-        setRole(r === "owner" ? "owner" : "customer");
+        setRole(r || "customer");
       } catch (e) {
-        console.log("role read error:", e?.message || e);
+        console.log("❌ role read error:", e?.message || e);
         setRole("customer");
       } finally {
-        setInitializing(false);
+        setLoading(false);
       }
     });
 
     return () => unsub();
   }, []);
 
-  if (initializing) {
+  // Loader
+  if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator size="large" />
       </View>
     );
   }
 
-  // לא מחובר
+  // לא מחובר => Auth stack
   if (!user) {
     return (
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Registration" component={RegistrationScreen} />
+        <Stack.Screen name="Register" component={RegistrationScreen} />
       </Stack.Navigator>
     );
   }
 
-  // OWNER: גם OwnerDashboard וגם כל מסכי הלקוחה (כולל BusinessHome)
+  // בעלת העסק => Owner stack
   if (role === "owner") {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="OwnerDashboard">
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="OwnerDashboard" component={OwnerDashboard} />
-
-        {/* מסך העסק שמוצג גם ללקוחה */}
-        <Stack.Screen name="BusinessHome" component={BusinessHomeScreen} />
-
-        {/* שאר מסכי הלקוחה */}
-        <Stack.Screen name="Calendar" component={CalendarScreen} />
-        <Stack.Screen name="Day" component={DayScreen} />
-        <Stack.Screen name="History" component={HistoryScreen} />
-        <Stack.Screen name="Prices" component={PricesScreen} />
+        {/* ✅ דף העסק עם עריכה לבעלת העסק בלבד */}
+        <Stack.Screen name="BusinessHomeOwner" component={BusinessHomeOwnerScreen} />
       </Stack.Navigator>
     );
   }
 
-  // CUSTOMER: דף ראשון BusinessHome
+  // לקוחות => Customer stack
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName="BusinessHome">
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="BusinessHome" component={BusinessHomeScreen} />
       <Stack.Screen name="Calendar" component={CalendarScreen} />
       <Stack.Screen name="Day" component={DayScreen} />
