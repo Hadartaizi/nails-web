@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "owner";
+    }
+
+    match /users/{userId} {
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isOwner());
+
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && !exists(/databases/$(database)/documents/userReservations/$(request.auth.uid));
+
+      allow delete: if request.auth != null
+        && (request.auth.uid == resource.data.userId || isOwner());
+
+      allow update: if false;
+    }
+
+    match /userReservations/{uid} {
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isOwner());
+
+      allow create, delete: if request.auth != null
+        && (request.auth.uid == uid || isOwner());
+
+      allow update: if false;
+    }
+  }
+}

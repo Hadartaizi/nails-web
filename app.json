@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "5b5efd8c-7776-47dd-9595-b100a3c060b4"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.hadartaizi.nailsproject",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
+}
