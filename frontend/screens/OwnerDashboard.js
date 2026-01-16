@@ -915,7 +915,14 @@ export default function OwnerDashboard({ navigation }) {
                   <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(16), textAlign: "center" }}>
                     תפריט
                   </Text>
-
+                  <MenuItem
+                    text="לקוחות פעילים"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setShowUsers(true);
+                    }}
+                  />
                   <MenuItem
                     text="הגדרת ברירת מחדל"
                     onPress={() => {
@@ -943,7 +950,7 @@ export default function OwnerDashboard({ navigation }) {
 
                   {/* ✅ כפתור מעבר למסך דף העסק */}
                   <MenuItem
-                    text="דף העסק (עריכה)"
+                    text="עריכת דף העסק"
                     onPress={() => {
                       setMenuOpen(false);
                       Keyboard.dismiss();
@@ -951,14 +958,6 @@ export default function OwnerDashboard({ navigation }) {
                     }}
                   />
 
-                  <MenuItem
-                    text="לקוחות פעילים"
-                    onPress={() => {
-                      setMenuOpen(false);
-                      Keyboard.dismiss();
-                      setShowUsers(true);
-                    }}
-                  />
                   <MenuItem
                     text="התנתקות"
                     danger

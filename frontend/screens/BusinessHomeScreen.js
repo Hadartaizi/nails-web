@@ -1,5 +1,5 @@
 // frontend/screens/BusinessHomeScreen.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Keyboard,
+  useWindowDimensions,
 } from "react-native";
 
 import {
@@ -158,6 +159,7 @@ function normalizeImgUri(uri, bustValue) {
 // ================== screen ==================
 export default function BusinessHomeScreen({ navigation }) {
   const userId = auth.currentUser?.uid || null;
+  const { width: screenWidth } = useWindowDimensions();
 
   // ====== Business profile (from Firestore) ======
   const [business, setBusiness] = useState(null);
@@ -196,6 +198,14 @@ export default function BusinessHomeScreen({ navigation }) {
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [galleryUpdatedAt, setGalleryUpdatedAt] = useState(Date.now());
 
+  // ⭐ NEW: תמונה מורחבת שנבחרה
+  const [expandedKey, setExpandedKey] = useState(null);
+
+  // ⭐ NEW: גלילה ממוקדת על תמונה
+  const galleryScrollRef = useRef(null);
+  const itemLayouts = useRef({}); // { keyId: { x, width } }
+  const [galleryContainerWidth, setGalleryContainerWidth] = useState(null);
+
   useEffect(() => {
     const ref = doc(db, "business", "galleryMain");
     const unsub = onSnapshot(
@@ -218,6 +228,18 @@ export default function BusinessHomeScreen({ navigation }) {
   }, []);
 
   const hasUploaded = Array.isArray(gallery) && gallery.length > 0;
+
+  // ⭐ NEW: פונקציה שמגלגלת כך שהתמונה תהיה במרכז
+  function scrollToImageCenter(itemKey) {
+    const layout = itemLayouts.current[itemKey];
+    if (!layout || !galleryScrollRef.current) return;
+
+    const containerWidth = galleryContainerWidth || screenWidth;
+    const centerX = layout.x + layout.width / 2;
+    const targetX = Math.max(0, centerX - containerWidth / 2);
+
+    galleryScrollRef.current.scrollTo({ x: targetX, animated: true });
+  }
 
   // ========= Reviews =========
   const [reviews, setReviews] = useState([]);
@@ -294,7 +316,10 @@ export default function BusinessHomeScreen({ navigation }) {
         const uSnap = await getDoc(doc(db, "users", userId));
         if (uSnap.exists()) {
           const u = uSnap.data();
-          const full = `${u?.firstName || ""} ${u?.lastName || ""}`.trim() || u?.displayName || u?.name;
+          const full =
+            `${u?.firstName || ""} ${u?.lastName || ""}`.trim() ||
+            u?.displayName ||
+            u?.name;
           if (full) userName = full;
         }
       } catch (e) {
@@ -366,13 +391,33 @@ export default function BusinessHomeScreen({ navigation }) {
             alignItems: "center",
           }}
         >
-          <Image source={LOGO} style={{ width: 96, height: 96, borderRadius: 18 }} resizeMode="cover" />
+          <Image
+            source={LOGO}
+            style={{ width: 96, height: 96, borderRadius: 18 }}
+            resizeMode="cover"
+          />
 
-          <Text style={{ marginTop: 10, fontSize: 22, fontWeight: "900", color: colors.primary, textAlign: "center" }}>
+          <Text
+            style={{
+              marginTop: 10,
+              fontSize: 22,
+              fontWeight: "900",
+              color: colors.primary,
+              textAlign: "center",
+            }}
+          >
             {b.businessName || "העסק שלי"}
           </Text>
 
-          <Text style={{ marginTop: 6, fontSize: 15, fontWeight: "800", color: colors.textDark, textAlign: "center" }}>
+          <Text
+            style={{
+              marginTop: 6,
+              fontSize: 15,
+              fontWeight: "800",
+              color: colors.textDark,
+              textAlign: "center",
+            }}
+          >
             בעלת העסק: {b.ownerName || "—"}
           </Text>
         </View>
@@ -381,8 +426,18 @@ export default function BusinessHomeScreen({ navigation }) {
         <SectionTitle>יצירת קשר וניווט</SectionTitle>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-          <ActionCard title="וואטסאפ" subtitle="פתיחת צ'אט" icon={whatsappLogo} onPress={() => openUrl(links.wa)} />
-          <ActionCard title="טלפון" subtitle={b.phoneDial || "—"} icon={phoneLogo} onPress={() => openUrl(links.tel)} />
+          <ActionCard
+            title="וואטסאפ"
+            subtitle="פתיחת צ'אט"
+            icon={whatsappLogo}
+            onPress={() => openUrl(links.wa)}
+          />
+          <ActionCard
+            title="טלפון"
+            subtitle={b.phoneDial || "—"}
+            icon={phoneLogo}
+            onPress={() => openUrl(links.tel)}
+          />
         </View>
 
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
@@ -392,88 +447,220 @@ export default function BusinessHomeScreen({ navigation }) {
             icon={instagramLogo}
             onPress={async () => {
               if (!links.igWeb) return;
-              const canDeep = links.igDeep ? await Linking.canOpenURL(links.igDeep) : false;
+              const canDeep = links.igDeep
+                ? await Linking.canOpenURL(links.igDeep)
+                : false;
               await openUrl(canDeep ? links.igDeep : links.igWeb);
             }}
           />
-          <ActionCard title="Waze" subtitle="ניווט" icon={wazeLogo} onPress={() => openUrl(links.waze)} />
+          <ActionCard
+            title="Waze"
+            subtitle="ניווט"
+            icon={wazeLogo}
+            onPress={() => openUrl(links.waze)}
+          />
         </View>
 
         {/* ✅ Gallery (Firestore) */}
         <SectionTitle>גלריה</SectionTitle>
-        <View style={{ marginTop: 10, backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
+        <View
+          style={{
+            marginTop: 10,
+            backgroundColor: "#fff",
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: colors.border,
+            padding: 12,
+          }}
+          onLayout={(e) => setGalleryContainerWidth(e.nativeEvent.layout.width)} // ⭐ שמירת רוחב הגלריה
+        >
           {galleryLoading ? (
-            <Text style={{ textAlign: "right", color: "gray", fontWeight: "700" }}>טוען גלריה…</Text>
+            <Text
+              style={{
+                textAlign: "right",
+                color: "gray",
+                fontWeight: "700",
+              }}
+            >
+              טוען גלריה…
+            </Text>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={{ flexDirection: "row", gap: 10 }}>
+            <ScrollView
+              ref={galleryScrollRef}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+            >
+              <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
                 {hasUploaded
-                  ? gallery.map((img) => (
-                      <Image
-                        key={`${img.id}_${galleryUpdatedAt}`}
-                        source={{ uri: normalizeImgUri(img.dataUrl, galleryUpdatedAt) }}
-                        style={{ width: 160, height: 160, borderRadius: 14, backgroundColor: "#f2f2f2" }}
-                        resizeMode="cover"
-                      />
-                    ))
-                  : NAILS_GALLERY.map((src, idx) => (
-                      <Image key={idx} source={src} style={{ width: 160, height: 160, borderRadius: 14 }} resizeMode="cover" />
-                    ))}
+                  ? gallery.map((img, idx) => {
+                      // ⭐ מפתח לתמונה
+                      const keyId = String(img.id || idx);
+                      const reactKey = `${keyId}_${galleryUpdatedAt}`;
+                      const isExpanded = expandedKey === keyId;
+
+                      const baseSize = 160;
+                      const expandedSize = 260;
+
+                      return (
+                        <Pressable
+                          key={reactKey}
+                          onPress={() => {
+                            setExpandedKey((prev) => (prev === keyId ? null : keyId));
+                            scrollToImageCenter(keyId); // ⭐ גלילה למרכז
+                          }}
+                          onLayout={(e) => {
+                            const { x, width } = e.nativeEvent.layout;
+                            itemLayouts.current[keyId] = { x, width };
+                          }}
+                          style={({ pressed }) => [
+                            { opacity: pressed ? 0.88 : 1 },
+                            Platform.OS === "web" ? { cursor: "pointer" } : null,
+                          ]}
+                        >
+                          <Image
+                            source={{
+                              uri: normalizeImgUri(img.dataUrl, galleryUpdatedAt),
+                            }}
+                            style={{
+                              width: isExpanded ? expandedSize : baseSize,
+                              height: isExpanded ? expandedSize : baseSize,
+                              borderRadius: 14,
+                              backgroundColor: "#f2f2f2",
+                            }}
+                            resizeMode="cover"
+                          />
+                        </Pressable>
+                      );
+                    })
+                  : NAILS_GALLERY.map((src, idx) => {
+                      const keyId = `default_${idx}`;
+                      const isExpanded = expandedKey === keyId;
+
+                      const baseSize = 160;
+                      const expandedSize = 260;
+
+                      return (
+                        <Pressable
+                          key={keyId}
+                          onPress={() => {
+                            setExpandedKey((prev) => (prev === keyId ? null : keyId));
+                            scrollToImageCenter(keyId); // ⭐ גלילה למרכז
+                          }}
+                          onLayout={(e) => {
+                            const { x, width } = e.nativeEvent.layout;
+                            itemLayouts.current[keyId] = { x, width };
+                          }}
+                          style={({ pressed }) => [
+                            { opacity: pressed ? 0.88 : 1 },
+                            Platform.OS === "web" ? { cursor: "pointer" } : null,
+                          ]}
+                        >
+                          <Image
+                            source={src}
+                            style={{
+                              width: isExpanded ? expandedSize : baseSize,
+                              height: isExpanded ? expandedSize : baseSize,
+                              borderRadius: 14,
+                            }}
+                            resizeMode="cover"
+                          />
+                        </Pressable>
+                      );
+                    })}
               </View>
             </ScrollView>
           )}
-
-          {!galleryLoading && hasUploaded ? (
-            <Text style={{ marginTop: 10, textAlign: "right", color: "#777", fontWeight: "700", fontSize: 12 }}>
-              התמונות נטענות מהגלריה של העסק.
-            </Text>
-          ) : null}
         </View>
 
         {/* Reviews */}
         <SectionTitle>ביקורות</SectionTitle>
 
         {!userId ? (
-          <Text style={{ marginTop: 10, textAlign: "right", color: "#666", fontWeight: "700" }}>כדי לכתוב ביקורת צריך להתחבר.</Text>
+          <Text
+            style={{
+              marginTop: 10,
+              textAlign: "right",
+              color: "#666",
+              fontWeight: "700",
+            }}
+          >
+            כדי לכתוב ביקורת צריך להתחבר.
+          </Text>
         ) : myExistingReview ? (
           <View style={{ marginTop: 10, flexDirection: "row", gap: 10 }}>
             <Pressable
               onPress={() => openReviewModal("edit")}
               style={({ pressed }) => [
-                { flex: 1, backgroundColor: "#fff", borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
+                {
+                  flex: 1,
+                  backgroundColor: "#fff",
+                  borderWidth: 1,
+                  borderColor: colors.primary,
+                  borderRadius: 14,
+                  paddingVertical: 12,
+                  alignItems: "center",
+                  opacity: pressed ? 0.88 : 1,
+                },
                 Platform.OS === "web" ? { cursor: "pointer" } : null,
               ]}
             >
-              <Text style={{ fontWeight: "900", color: colors.primary }}>ערכי את הביקורת שלך ✏️</Text>
+              <Text style={{ fontWeight: "900", color: colors.primary }}>
+                ערכי את הביקורת שלך ✏️
+              </Text>
             </Pressable>
 
             <Pressable
               onPress={deleteMyReview}
               style={({ pressed }) => [
-                { flex: 1, backgroundColor: "#fff", borderWidth: 1, borderColor: "#c62828", borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
+                {
+                  flex: 1,
+                  backgroundColor: "#fff",
+                  borderWidth: 1,
+                  borderColor: "#c62828",
+                  borderRadius: 14,
+                  paddingVertical: 12,
+                  alignItems: "center",
+                  opacity: pressed ? 0.88 : 1,
+                },
                 Platform.OS === "web" ? { cursor: "pointer" } : null,
               ]}
             >
-              <Text style={{ fontWeight: "900", color: "#c62828" }}>מחקי ביקורת 🗑️</Text>
+              <Text style={{ fontWeight: "900", color: "#c62828" }}>
+                מחקי ביקורת 🗑️
+              </Text>
             </Pressable>
           </View>
         ) : (
           <Pressable
             onPress={() => openReviewModal("new")}
             style={({ pressed }) => [
-              { marginTop: 10, backgroundColor: "#fff", borderWidth: 1, borderColor: colors.primary, borderRadius: 14, paddingVertical: 12, alignItems: "center", opacity: pressed ? 0.88 : 1 },
+              {
+                marginTop: 10,
+                backgroundColor: "#fff",
+                borderWidth: 1,
+                borderColor: colors.primary,
+                borderRadius: 14,
+                paddingVertical: 12,
+                alignItems: "center",
+                opacity: pressed ? 0.88 : 1,
+              },
               Platform.OS === "web" ? { cursor: "pointer" } : null,
             ]}
           >
-            <Text style={{ fontWeight: "900", color: colors.primary }}>כתבי ביקורת ⭐</Text>
+            <Text style={{ fontWeight: "900", color: colors.primary }}>
+              כתבי ביקורת ⭐
+            </Text>
           </Pressable>
         )}
 
         <View style={{ marginTop: 10 }}>
           {reviewsLoading ? (
-            <Text style={{ textAlign: "right", color: "gray" }}>טוען ביקורות…</Text>
+            <Text style={{ textAlign: "right", color: "gray" }}>
+              טוען ביקורות…
+            </Text>
           ) : reviews.length === 0 ? (
-            <Text style={{ textAlign: "right", color: "gray" }}>אין עדיין ביקורות. תהיי הראשונה 🙂</Text>
+            <Text style={{ textAlign: "right", color: "gray" }}>
+              אין עדיין ביקורות. תהיי הראשונה 🙂</Text>
           ) : (
             reviews.map((r) => (
               <View
@@ -485,30 +672,68 @@ export default function BusinessHomeScreen({ navigation }) {
                   borderColor: colors.border,
                   padding: 12,
                   marginBottom: 10,
-                  alignItems: "flex-end",
+                  alignItems: "flex	end",
                 }}
               >
-                <Text style={{ fontWeight: "900", color: colors.textDark, width: "100%", textAlign: "right" }}>
+                <Text
+                  style={{
+                    fontWeight: "900",
+                    color: colors.textDark,
+                    width: "100%",
+                    textAlign: "right",
+                  }}
+                >
                   {r.userName || "לקוחה"}
                 </Text>
 
-                <View style={{ marginTop: 6, width: "100%", flexDirection: "row", justifyContent: "flex-end" }}>
+                <View
+                  style={{
+                    marginTop: 6,
+                    width: "100%",
+                    flexDirection: "row",
+                    justifyContent: "flex-end",
+                  }}
+                >
                   <StarsRow rating={Number(r.rating || 0)} />
                 </View>
 
-                <Text style={{ marginTop: 8, color: "#444", fontWeight: "700", width: "100%", textAlign: "right", lineHeight: 20 }}>
+                <Text
+                  style={{
+                    marginTop: 8,
+                    color: "#444",
+                    fontWeight: "700",
+                    width: "100%",
+                    textAlign: "right",
+                    lineHeight: 20,
+                  }}
+                >
                   {String(r.text || "")}
                 </Text>
 
                 {userId && (r.userId === userId || r.id === userId) ? (
-                  <Text style={{ marginTop: 6, color: colors.primary, fontWeight: "900" }}>הביקורת שלי</Text>
+                  <Text
+                    style={{
+                      marginTop: 6,
+                      color: colors.primary,
+                      fontWeight: "900",
+                    }}
+                  >
+                    הביקורת שלי
+                  </Text>
                 ) : null}
               </View>
             ))
           )}
         </View>
 
-        <Text style={{ textAlign: "center", color: "#666", fontWeight: "700", marginTop: 6 }}>
+        <Text
+          style={{
+            textAlign: "center",
+            color: "#666",
+            fontWeight: "700",
+            marginTop: 6,
+          }}
+        >
           נתקלת בבעיה? אפשר לפנות אלינו דרך וואטסאפ או טלפון.
         </Text>
       </ScrollView>
@@ -539,27 +764,74 @@ export default function BusinessHomeScreen({ navigation }) {
             Platform.OS === "web" ? { cursor: "pointer" } : null,
           ]}
         >
-          <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>מעבר לקביעת תור 📅</Text>
+          <Text
+            style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}
+          >
+            מעבר לקביעת תור 📅
+          </Text>
         </Pressable>
       </View>
 
       {/* ===== MODAL: כתיבה/עריכה ===== */}
-      <Modal visible={reviewModalOpen} transparent animationType="fade" onRequestClose={() => setReviewModalOpen(false)}>
+      <Modal
+        visible={reviewModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReviewModalOpen(false)}
+      >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "center", padding: 16 }}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.35)",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
             <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={{ backgroundColor: "#fff", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border }}>
-                <Text style={{ fontSize: 18, fontWeight: "900", textAlign: "center", color: colors.primary }}>
+              <View
+                style={{
+                  backgroundColor: "#fff",
+                  borderRadius: 16,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: "900",
+                    textAlign: "center",
+                    color: colors.primary,
+                  }}
+                >
                   {myExistingReview ? "עריכת ביקורת" : "כתיבת ביקורת"}
                 </Text>
 
-                <Text style={{ marginTop: 10, fontWeight: "800", textAlign: "right" }}>דירוג:</Text>
+                <Text
+                  style={{
+                    marginTop: 10,
+                    fontWeight: "800",
+                    textAlign: "right",
+                  }}
+                >
+                  דירוג:
+                </Text>
 
                 <View style={{ marginTop: 8, alignItems: "flex-end" }}>
                   <StarsRow rating={myRating} onChange={setMyRating} size={26} />
                 </View>
 
-                <Text style={{ marginTop: 12, fontWeight: "800", textAlign: "right" }}>טקסט:</Text>
+                <Text
+                  style={{
+                    marginTop: 12,
+                    fontWeight: "800",
+                    textAlign: "right",
+                  }}
+                >
+                  טקסט:
+                </Text>
 
                 <TextInput
                   value={myText}
@@ -587,7 +859,15 @@ export default function BusinessHomeScreen({ navigation }) {
                     onPress={() => setReviewModalOpen(false)}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#bbb", alignItems: "center", opacity: pressed ? 0.88 : 1 },
+                      {
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: "#bbb",
+                        alignItems: "center",
+                        opacity: pressed ? 0.88 : 1,
+                      },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
@@ -598,11 +878,22 @@ export default function BusinessHomeScreen({ navigation }) {
                     onPress={saveReview}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: colors.primary, alignItems: "center", opacity: savingReview ? 0.6 : pressed ? 0.88 : 1 },
+                      {
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        backgroundColor: colors.primary,
+                        alignItems: "center",
+                        opacity: savingReview ? 0.6 : pressed ? 0.88 : 1,
+                      },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
-                    <Text style={{ fontWeight: "900", color: "#fff" }}>{savingReview ? "שומר..." : "שמירה"}</Text>
+                    <Text
+                      style={{ fontWeight: "900", color: "#fff" }}
+                    >
+                      {savingReview ? "שומר..." : "שמירה"}
+                    </Text>
                   </Pressable>
                 </View>
 
@@ -611,11 +902,23 @@ export default function BusinessHomeScreen({ navigation }) {
                     onPress={deleteMyReview}
                     disabled={savingReview}
                     style={({ pressed }) => [
-                      { marginTop: 10, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#c62828", alignItems: "center", opacity: pressed ? 0.88 : 1 },
+                      {
+                        marginTop: 10,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: "#c62828",
+                        alignItems: "center",
+                        opacity: pressed ? 0.88 : 1,
+                      },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
-                    <Text style={{ fontWeight: "900", color: "#c62828" }}>מחיקת ביקורת</Text>
+                    <Text
+                      style={{ fontWeight: "900", color: "#c62828" }}
+                    >
+                      מחיקת ביקורת
+                    </Text>
                   </Pressable>
                 ) : null}
               </View>

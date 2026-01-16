@@ -76,17 +76,17 @@ export default function CalendarScreen({ navigation }) {
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  // ✅ userId יציב (ולא auth.currentUser שעלול להיות null רגעית)
+  // ✅ userId יציב
   const [userId, setUserId] = useState(auth.currentUser?.uid || null);
 
   const [myRes, setMyRes] = useState(null);
-  const prevStatusRef = useRef(null); // ✅ במקום lastStatus (מונע לופים/Alerts כפולים)
+  const prevStatusRef = useRef(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // ✅ החודש שמוצג ביומן
   const [calendarMonthDate, setCalendarMonthDate] = useState(today);
 
-  // ✅ ימים עם שעות מיוחדות (override) — רק אלו יקבלו נקודה
+  // ✅ ימים עם שעות מיוחדות (override)
   const [overrideDaysMarked, setOverrideDaysMarked] = useState({});
 
   // ✅ auth listener
@@ -97,7 +97,7 @@ export default function CalendarScreen({ navigation }) {
     return () => unsub();
   }, []);
 
-  // ✅ מאזין לתור של המשתמש + Alert כשהתור אושר (בלי תלות ב-lastStatus)
+  // ✅ מאזין לתור של המשתמש
   useEffect(() => {
     if (!userId) {
       setMyRes(null);
@@ -134,7 +134,7 @@ export default function CalendarScreen({ navigation }) {
     return () => unsub();
   }, [userId]);
 
-  // ✅ אם התור עבר — מעבירים להיסטוריה ומוחקים userReservations
+  // ✅ אם התור עבר — היסטוריה
   useEffect(() => {
     if (!userId || !myRes?.appointmentId) return;
     if (!isReservationPassed(myRes)) return;
@@ -171,7 +171,7 @@ export default function CalendarScreen({ navigation }) {
     })();
   }, [userId, myRes]);
 
-  // ✅ נקודה רק לתאריכים שיש להם availability ידני (עם שעות)
+  // ✅ נקודות ביומן
   useEffect(() => {
     const { start, endExclusive } = monthRange(calendarMonthDate);
 
@@ -222,7 +222,7 @@ export default function CalendarScreen({ navigation }) {
     ]);
   }
 
-  // ✅ ביטול תור של המשתמש (pending/approved) בצורה בטוחה
+  // ✅ ביטול תור
   async function cancelMyReservationFromCalendar() {
     if (!userId) {
       Alert.alert("שגיאה", "את חייבת להיות מחוברת");
@@ -252,7 +252,6 @@ export default function CalendarScreen({ navigation }) {
         const appRef = doc(db, "appointments", appointmentId);
         const appSnap = await tx.get(appRef);
 
-        // מוחקים appointment רק אם הוא שייך למשתמש
         if (appSnap.exists()) {
           const appData = appSnap.data();
           if (appData?.userId && appData.userId !== userId) {
@@ -261,7 +260,6 @@ export default function CalendarScreen({ navigation }) {
           tx.delete(appRef);
         }
 
-        // מוחקים userReservations תמיד
         tx.delete(userResRef);
       });
 
@@ -363,35 +361,88 @@ export default function CalendarScreen({ navigation }) {
             }}
             accessibilityLabel="פתח תפריט"
           >
-            <View style={{ width: rf(18), height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
-            <View style={{ width: rf(18), height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
-            <View style={{ width: rf(18), height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
+            <View
+              style={{
+                width: rf(18),
+                height: 2,
+                backgroundColor: colors.primary,
+                marginVertical: 2,
+                borderRadius: 2,
+              }}
+            />
+            <View
+              style={{
+                width: rf(18),
+                height: 2,
+                backgroundColor: colors.primary,
+                marginVertical: 2,
+                borderRadius: 2,
+              }}
+            />
+            <View
+              style={{
+                width: rf(18),
+                height: 2,
+                backgroundColor: colors.primary,
+                marginVertical: 2,
+                borderRadius: 2,
+              }}
+            />
           </Pressable>
 
-          <Text style={{ fontSize: rf(26), fontWeight: "900", color: colors.primary, textAlign: "center" }}>
+          <Text
+            style={{
+              fontSize: rf(26),
+              fontWeight: "900",
+              color: colors.primary,
+              textAlign: "center",
+            }}
+          >
             קביעת תור
           </Text>
 
-          <Text style={{ marginTop: rf(6), fontSize: rf(15), color: colors.textDark, textAlign: "center", fontWeight: "600" }}>
+          <Text
+            style={{
+              marginTop: rf(6),
+              fontSize: rf(15),
+              color: colors.textDark,
+              textAlign: "center",
+              fontWeight: "600",
+            }}
+          >
             בחרי תאריך ביומן כדי להמשיך
           </Text>
 
-          <Text style={{ marginTop: rf(6), color: "#666", fontWeight: "700", textAlign: "center" }}>
+          <Text
+            style={{
+              marginTop: rf(6),
+              color: "#666",
+              fontWeight: "700",
+              textAlign: "center",
+            }}
+          >
             נקודה מתחת ליום = שעות מיוחדות שהוגדרו ידנית
           </Text>
         </View>
 
         {/* Calendar */}
-        <View style={{ backgroundColor: "#fff", borderRadius: rf(16), borderWidth: 1, borderColor: colors.border, padding: rf(10) }}>
+        <View
+          style={{
+            backgroundColor: "#fff",
+            borderRadius: rf(16),
+            borderWidth: 1,
+            borderColor: colors.border,
+            padding: rf(10),
+          }}
+        >
           <Calendar
             minDate={today}
             markedDates={markedDates}
             onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
             onDayPress={(day) => {
-              // ✅ תאימות לגרסה החדשה והישנה ביחד:
               navigation.navigate("Day", {
-                selectedDate: day.dateString, // ישן
-                date: day.dateString,         // חדש
+                selectedDate: day.dateString,
+                date: day.dateString,
                 requireApproval: true,
               });
             }}
@@ -414,26 +465,73 @@ export default function CalendarScreen({ navigation }) {
         </View>
 
         {/* My Reservation */}
-        <View style={{ marginTop: rf(12), backgroundColor: "#fff", borderRadius: rf(14), borderWidth: 1, borderColor: colors.border, paddingVertical: rf(12), paddingHorizontal: rf(12) }}>
-          <Text style={{ fontWeight: "900", color: colors.primary, fontSize: rf(16), textAlign: "center" }}>
+        <View
+          style={{
+            marginTop: rf(12),
+            backgroundColor: "#fff",
+            borderRadius: rf(14),
+            borderWidth: 1,
+            borderColor: colors.border,
+            paddingVertical: rf(12),
+            paddingHorizontal: rf(12),
+          }}
+        >
+          <Text
+            style={{
+              fontWeight: "900",
+              color: colors.primary,
+              fontSize: rf(16),
+              textAlign: "center",
+            }}
+          >
             התור שלי
           </Text>
 
           {!myRes ? (
-            <Text style={{ marginTop: rf(8), textAlign: "center", color: "gray", fontWeight: "700", fontSize: rf(14) }}>
+            <Text
+              style={{
+                marginTop: rf(8),
+                textAlign: "center",
+                color: "gray",
+                fontWeight: "700",
+                fontSize: rf(14),
+              }}
+            >
               אין לך תור פעיל כרגע
             </Text>
           ) : (
             <>
-              <Text style={{ marginTop: rf(8), textAlign: "center", color: colors.textDark, fontWeight: "900", fontSize: rf(16) }}>
+              <Text
+                style={{
+                  marginTop: rf(8),
+                  textAlign: "center",
+                  color: colors.textDark,
+                  fontWeight: "900",
+                  fontSize: rf(16),
+                }}
+              >
                 {myRes.date} • {myRes.hour} {niceService}
               </Text>
 
-              <Text style={{ marginTop: 6, textAlign: "center", fontWeight: "900", color: myRes.status === "approved" ? "#2e7d32" : "#ff8f00" }}>
+              <Text
+                style={{
+                  marginTop: 6,
+                  textAlign: "center",
+                  fontWeight: "900",
+                  color:
+                    myRes.status === "approved" ? "#2e7d32" : "#ff8f00",
+                }}
+              >
                 סטטוס: {statusLabel}
               </Text>
 
-              <View style={{ flexDirection: "row", gap: rf(10), marginTop: rf(12) }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  gap: rf(10),
+                  marginTop: rf(12),
+                }}
+              >
                 <Pressable
                   onPress={() =>
                     navigation.navigate("Day", {
@@ -442,9 +540,25 @@ export default function CalendarScreen({ navigation }) {
                       requireApproval: true,
                     })
                   }
-                  style={{ flex: 1, backgroundColor: "#fff", borderRadius: rf(12), borderWidth: 1, borderColor: colors.primary, paddingVertical: rf(10), alignItems: "center" }}
+                  style={{
+                    flex: 1,
+                    backgroundColor: "#fff",
+                    borderRadius: rf(12),
+                    borderWidth: 1,
+                    borderColor: colors.primary,
+                    paddingVertical: rf(10),
+                    alignItems: "center",
+                  }}
                 >
-                  <Text style={{ color: colors.primary, fontWeight: "900", fontSize: rf(14) }}>מעבר לתאריך</Text>
+                  <Text
+                    style={{
+                      color: colors.primary,
+                      fontWeight: "900",
+                      fontSize: rf(14),
+                    }}
+                  >
+                    מעבר לתאריך
+                  </Text>
                 </Pressable>
 
                 {!passed ? (
@@ -457,12 +571,32 @@ export default function CalendarScreen({ navigation }) {
                       }
                       Alert.alert("ביטול תור", "לבטל את התור?", [
                         { text: "לא", style: "cancel" },
-                        { text: "כן", style: "destructive", onPress: cancelMyReservationFromCalendar },
+                        {
+                          text: "כן",
+                          style: "destructive",
+                          onPress: cancelMyReservationFromCalendar,
+                        },
                       ]);
                     }}
-                    style={{ flex: 1, backgroundColor: "#fff", borderRadius: rf(12), borderWidth: 1, borderColor: "#d33", paddingVertical: rf(10), alignItems: "center" }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#fff",
+                      borderRadius: rf(12),
+                      borderWidth: 1,
+                      borderColor: "#d33",
+                      paddingVertical: rf(10),
+                      alignItems: "center",
+                    }}
                   >
-                    <Text style={{ color: "#d33", fontWeight: "900", fontSize: rf(14) }}>ביטול תור</Text>
+                    <Text
+                      style={{
+                        color: "#d33",
+                        fontWeight: "900",
+                        fontSize: rf(14),
+                      }}
+                    >
+                      ביטול תור
+                    </Text>
                   </Pressable>
                 ) : (
                   <View style={{ flex: 1 }} />
@@ -474,14 +608,82 @@ export default function CalendarScreen({ navigation }) {
       </ScrollView>
 
       {/* Menu */}
-      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable onPress={() => setMenuOpen(false)} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: rf(18) }}>
-          <Pressable onPress={() => {}} style={{ marginTop: rf(70), alignSelf: "flex-end", width: rf(220), backgroundColor: "#fff", borderRadius: rf(16), borderWidth: 1, borderColor: colors.border, padding: rf(14) }}>
-            <Text style={{ fontWeight: "900", color: colors.primary, fontSize: rf(16), textAlign: "center" }}>תפריט</Text>
-            <MenuItem text="היסטוריית תורים" onPress={() => { setMenuOpen(false); navigation.navigate("History"); }} />
-            <MenuItem text="מחירים" onPress={() => { setMenuOpen(false); navigation.navigate("Prices"); }} />
-            <MenuItem text="התנתקות" danger onPress={() => { setMenuOpen(false); confirmLogout(); }} />
-            <MenuItem text="סגור" onPress={() => setMenuOpen(false)} />
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          onPress={() => setMenuOpen(false)}
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.35)",
+            padding: rf(18),
+          }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              marginTop: rf(70),
+              alignSelf: "flex-end",
+              width: rf(220),
+              backgroundColor: "#fff",
+              borderRadius: rf(16),
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: rf(14),
+            }}
+          >
+            <Text
+              style={{
+                fontWeight: "900",
+                color: colors.primary,
+                fontSize: rf(16),
+                textAlign: "center",
+              }}
+            >
+              תפריט
+            </Text>
+
+            <MenuItem
+              text="היסטוריית תורים"
+              onPress={() => {
+                setMenuOpen(false);
+                navigation.navigate("History");
+              }}
+            />
+
+            <MenuItem
+              text="מחירים"
+              onPress={() => {
+                setMenuOpen(false);
+                navigation.navigate("Prices");
+              }}
+            />
+
+            {/* ⭐ חדש: מעבר למסך BusinessHomeScreen */}
+            <MenuItem
+              text="עמוד הבית של העסק"
+              onPress={() => {
+                setMenuOpen(false);
+                navigation.navigate("BusinessHome");
+              }}
+            />
+
+            <MenuItem
+              text="התנתקות"
+              danger
+              onPress={() => {
+                setMenuOpen(false);
+                confirmLogout();
+              }}
+            />
+
+            <MenuItem
+              text="סגור"
+              onPress={() => setMenuOpen(false)}
+            />
           </Pressable>
         </Pressable>
       </Modal>

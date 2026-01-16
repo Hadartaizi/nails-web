@@ -34,7 +34,13 @@ export default function HistoryScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
 
-  // ✅ auth listener
+  // ⭐ גובה לאזור הרשימה (רק הבלוקים גוללים)
+  const listMaxHeight = useMemo(() => {
+    if (width < 420) return 480;
+    if (width < 768) return 650;
+    return 800;
+  }, [width]);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setUserId(user?.uid || null);
@@ -42,7 +48,6 @@ export default function HistoryScreen({ navigation }) {
     return () => unsub();
   }, []);
 
-  // ✅ history listener
   useEffect(() => {
     if (!userId) {
       setItems([]);
@@ -72,10 +77,8 @@ export default function HistoryScreen({ navigation }) {
 
   return (
     <View style={[globalStyles.container, { backgroundColor: "transparent" }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: rf(24) }}
-      >
+      {/* במקום ScrollView חיצוני — View רגיל כדי שהמסך לא יגלול */}
+      <View style={{ flex: 1, paddingBottom: rf(24) }}>
         {/* Header */}
         <View
           style={{
@@ -116,98 +119,117 @@ export default function HistoryScreen({ navigation }) {
         </View>
 
         {/* Content */}
-        {loading ? (
-          <View style={{ marginTop: rf(20), alignItems: "center" }}>
-            <ActivityIndicator size="large" />
-          </View>
-        ) : items.length === 0 ? (
-          <View
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: rf(14),
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: rf(16),
-            }}
-          >
-            <Text
+        <View style={{ flex: 1 }}>
+          {loading ? (
+            <View style={{ marginTop: rf(20), alignItems: "center" }}>
+              <ActivityIndicator size="large" />
+            </View>
+          ) : items.length === 0 ? (
+            <View
               style={{
-                color: colors.textDark,
-                fontWeight: "700",
-                textAlign: "center",
-                flexWrap: "wrap",
-                fontSize: rf(14),
+                backgroundColor: "#fff",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: rf(16),
               }}
             >
-              אין לך עדיין תורים בהיסטוריה 🙂
-            </Text>
-          </View>
-        ) : (
-          <View>
-            {items.map((a) => (
-              <View
-                key={a.id}
+              <Text
                 style={{
-                  backgroundColor: "#fff",
-                  borderRadius: rf(14),
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                  padding: rf(14),
-                  marginBottom: rf(10),
-                  alignItems: "flex-end",
+                  color: colors.textDark,
+                  fontWeight: "700",
+                  textAlign: "center",
+                  flexWrap: "wrap",
+                  fontSize: rf(14),
                 }}
               >
-                <Text
-                  style={{
-                    fontSize: rf(16),
-                    fontWeight: "900",
-                    color: colors.primary,
-                    textAlign: "right",
-                    writingDirection: "rtl",
-                    width: "100%",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {a.date} • {a.hour || ""}
-                </Text>
-
-                {!!a.serviceType && (
-                  <Text
+                אין לך עדיין תורים בהיסטוריה 🙂
+              </Text>
+            </View>
+          ) : (
+            // ⭐ הבלוק עצמו לא גולל — רק ה-ScrollView שבתוכו
+            <View
+              style={{
+                backgroundColor: "#fff",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: rf(10),
+                flex: 1,
+                maxHeight: listMaxHeight, // מגביל גובה כדי להשאיר מקום לכפתור חזרה
+              }}
+            >
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                contentContainerStyle={{ paddingBottom: rf(8) }}
+              >
+                {items.map((a) => (
+                  <View
+                    key={a.id}
                     style={{
-                      marginTop: rf(6),
-                      color: colors.textDark,
-                      fontWeight: "700",
-                      textAlign: "right",
-                      writingDirection: "rtl",
-                      width: "100%",
-                      flexWrap: "wrap",
-                      fontSize: rf(14),
+                      backgroundColor: "#fff",
+                      borderRadius: rf(14),
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      padding: rf(14),
+                      marginBottom: rf(10),
+                      alignItems: "flex-end",
                     }}
                   >
-                    טיפול: {a.serviceType}
-                  </Text>
-                )}
+                    <Text
+                      style={{
+                        fontSize: rf(16),
+                        fontWeight: "900",
+                        color: colors.primary,
+                        textAlign: "right",
+                        writingDirection: "rtl",
+                        width: "100%",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      {a.date} • {a.hour || ""}
+                    </Text>
 
-                <Text
-                  style={{
-                    marginTop: rf(6),
-                    color: "gray",
-                    fontWeight: "700",
-                    textAlign: "right",
-                    writingDirection: "rtl",
-                    width: "100%",
-                    flexWrap: "wrap",
-                    fontSize: rf(14),
-                  }}
-                >
-                  סטטוס: {a.status === "completed" ? "בוצע" : a.status || "—"}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
+                    {!!a.serviceType && (
+                      <Text
+                        style={{
+                          marginTop: rf(6),
+                          color: colors.textDark,
+                          fontWeight: "700",
+                          textAlign: "right",
+                          writingDirection: "rtl",
+                          width: "100%",
+                          flexWrap: "wrap",
+                          fontSize: rf(14),
+                        }}
+                      >
+                        טיפול: {a.serviceType}
+                      </Text>
+                    )}
 
-        {/* Back */}
+                    <Text
+                      style={{
+                        marginTop: rf(6),
+                        color: "gray",
+                        fontWeight: "700",
+                        textAlign: "right",
+                        writingDirection: "rtl",
+                        width: "100%",
+                        flexWrap: "wrap",
+                        fontSize: rf(14),
+                      }}
+                    >
+                      סטטוס: {a.status === "completed" ? "בוצע" : a.status || "—"}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+
+        {/* Back - נשאר למטה ולא גולל */}
         <Pressable
           onPress={() => navigation.goBack()}
           style={{
@@ -218,11 +240,18 @@ export default function HistoryScreen({ navigation }) {
             alignItems: "center",
           }}
         >
-          <Text style={{ color: "#fff", fontWeight: "900", fontSize: rf(15), flexWrap: "wrap" }}>
+          <Text
+            style={{
+              color: "#fff",
+              fontWeight: "900",
+              fontSize: rf(15),
+              flexWrap: "wrap",
+            }}
+          >
             חזרה
           </Text>
         </Pressable>
-      </ScrollView>
+      </View>
     </View>
   );
 }

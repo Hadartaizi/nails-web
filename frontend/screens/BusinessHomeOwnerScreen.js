@@ -755,9 +755,6 @@ export default function BusinessHomeOwnerScreen({ navigation }) {
               <Text style={{ fontWeight: "800", color: "#666", textAlign: "right" }}>
                 {hasUploaded ? `תמונות שהועלו: ${gallery.length}` : "מציג גלריה לדוגמה"}
               </Text>
-              <Text style={{ fontWeight: "700", color: "#888", textAlign: "right", fontSize: 12 }}>
-                (תמונות נשמרות ב־Firestore ללא Storage)
-              </Text>
             </View>
           </View>
 
@@ -815,10 +812,6 @@ export default function BusinessHomeOwnerScreen({ navigation }) {
 
         {/* Reviews */}
         <SectionTitle>ביקורות</SectionTitle>
-
-        <Text style={{ marginTop: 10, textAlign: "right", color: "#666", fontWeight: "800" }}>
-          בעלת העסק יכולה למחוק ביקורות לא מתאימות.
-        </Text>
 
         <View style={{ marginTop: 10 }}>
           {reviewsLoading ? (
