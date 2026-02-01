@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Nails Rotem Studio",
+    "slug": "nails-rotem-studio",
+
+    "icon": "./assets/appLogo.png",
+
+    "ios": {
+      "icon": "./assets/appLogo.png"
+    },
+    "android": {
+      "icon": "./assets/appLogo.png"
+    },
+
+    "web": {
+      "name": "Nails Rotem Studio",
+      "favicon": "./assets/appLogo.png",
+      "icon": "./assets/appLogo.png"
+    },
+
+    "platforms": ["ios", "android", "web"],
+    "experiments": {
+      "webBundler": "metro"
+    },
+
+    "extra": {
+      "eas": {
+        "projectId": "d26c7752-4c2f-46b6-a51a-d943d1e1d5b9"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d26c7752-4c2f-46b6-a51a-d943d1e1d5b9"
+    }
+  }
+}
