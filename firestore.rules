@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ✅ פונקציה שבודקת אם המשתמש הוא בעלת המערכת
+    function isOwner() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "owner";
+    }
+
+    // ============= users =============
+    match /users/{userId} {
+      // קריאה: המשתמש עצמו או בעלת המערכת
+      allow read: if request.auth != null
+        && (request.auth.uid == userId || isOwner());
+
+      // כתיבה: רק המשתמש על עצמו (owner לא משנה ידנית אחרים כאן)
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ============= appointments =============
+    match /appointments/{appointmentId} {
+      // לקרוא תורים – כל משתמש מחובר
+      allow read: if request.auth != null;
+
+      // יצירת תור:
+      // לקוחות – רק אם אין להם userReservations פעיל
+      // בעלת המערכת – יכולה ליצור תמיד (למשל שריון ידני)
+      allow create: if request.auth != null
+        && (
+          isOwner() ||
+          !exists(/databases/$(database)/documents/userReservations/$(request.auth.uid))
+        );
+
+      // מחיקת תור – ע"י מי שיצר את התור (userId) או בעלת המערכת
+      allow delete: if request.auth != null
+        && (request.auth.uid == resource.data.userId || isOwner());
+
+      // עדכון תור – הקוד של OwnerDashboard עושה update (אישור בקשה וכו')
+      // לכן צריך להתיר עדכון לבעלת המערכת
+      allow update: if request.auth != null && isOwner();
+    }
+
+    // ============= userReservations =============
+    match /userReservations/{uid} {
+      // קריאה – המשתמש על עצמו או בעלת המערכת
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isOwner());
+
+      // יצירה / מחיקה – המשתמש על עצמו או בעלת המערכת
+      allow create, delete: if request.auth != null
+        && (request.auth.uid == uid || isOwner());
+
+      // עדכון – נדרש כי OwnerDashboard עושה set(..., {merge:true})
+      // באישור/דחיית בקשה ועוד
+      allow update: if request.auth != null
+        && (request.auth.uid == uid || isOwner());
+    }
+
+    // ============= appointmentRequests =============
+    // בקשות תור (הטבלה appointmentRequests שמאזינים אליה במסך בעלת העסק)
+    match /appointmentRequests/{requestId} {
+
+      // קריאה:
+      //   • בעלת המערכת – יכולה לראות הכול
+      //   • לקוח – יכול לקרוא רק בקשות ששייכות לו (userId)
+      allow read: if request.auth != null
+        && (
+          isOwner() ||
+          (request.auth.uid == resource.data.userId)
+        );
+
+      // יצירת בקשה – רק ע"י המשתמש לעצמו
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.userId;
+
+      // עדכון / מחיקה:
+      //   • בעלת המערכת – לאשר / לדחות / לעדכן סטטוס
+      //   • הלקוח – יכול לעדכן או לבטל את הבקשה של עצמו (אם תרצי להגביל רק לביטול אפשר להחמיר)
+      allow update, delete: if request.auth != null
+        && (
+          isOwner() ||
+          (request.auth.uid == resource.data.userId)
+        );
+    }
+
+    // ============= settings =============
+    // הגדרות כלליות של העסק (settings/business) – שעות ברירת מחדל + טיפולים
+    match /settings/{settingId} {
+
+      // כל משתמש מחובר יכול לקרוא (כדי לראות שעות, טיפולים, וכו')
+      allow read: if request.auth != null;
+
+      // רק בעלת המערכת יכולה לעדכן
+      allow write: if request.auth != null && isOwner();
+    }
+
+    // ============= availability =============
+    // שעות זמינות ליום ספציפי (availability/{date})
+    match /availability/{dateId} {
+
+      // כל משתמש מחובר יכול לקרוא כדי לראות שעות פנויות
+      allow read: if request.auth != null;
+
+      // רק בעלת המערכת יכולה לערוך שעות ליום מסוים
+      allow write: if request.auth != null && isOwner();
+    }
+  }
+}
