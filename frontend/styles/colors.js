@@ -1,8 +1,19 @@
 export default {
-  primary: "#5D3FD3",
-  secondary: "#8A2BE2",
-  background: "#F4F4F9",
-  textDark: "#333333",
+  // צבע ראשי – ורוד
+  primary: "#FDB5CE",
+
+  // צבע משני – ורוד עמוק ועדין (כפתורים משניים / אייקונים)
+  secondary: "#F29CB8",
+
+  // רקע כללי – ורוד בהיר מאוד (שומר על ניקיון)
+  background: "#FFF6FA",
+
+  // טקסט כהה – מותאם לוורוד (לא שחור קשוח)
+  textDark: "#4A2E38",
+
+  // טקסט בהיר – נשאר לבן
   textLight: "#FFFFFF",
-  border: "#E0E0E0",
+
+  // גבולות / מסגרות – ורוד אפור עדין
+  border: "#F1CCD9",
 };

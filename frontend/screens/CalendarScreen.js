@@ -769,7 +769,7 @@ export default function CalendarScreen({ navigation }) {
         paddingHorizontal: rf(14),
         borderRadius: rf(12),
         borderWidth: 1,
-        borderColor: danger ? "#d33" : colors.border,
+        borderColor: danger ? "#D6455D" : colors.border,
         backgroundColor: "#fff",
         marginTop: rf(10),
         alignItems: "center",
@@ -778,7 +778,7 @@ export default function CalendarScreen({ navigation }) {
       <Text
         style={{
           fontWeight: "900",
-          color: danger ? "#d33" : colors.textDark,
+          color: danger ? "#D6455D" : colors.textDark,
           fontSize: rf(15),
           flexWrap: "wrap",
           textAlign: "center",
@@ -1057,7 +1057,7 @@ export default function CalendarScreen({ navigation }) {
                     textAlign: "center",
                     fontWeight: "900",
                     color:
-                      activeRes.status === "approved" ? "#2e7d32" : "#ff8f00",
+                      activeRes.status === "approved" ? "#4CAF50" : "#F5A623",
                   }}
                 >
                   סטטוס: {statusLabel}
@@ -1145,14 +1145,14 @@ export default function CalendarScreen({ navigation }) {
                         backgroundColor: "rgba(255,255,255,0.95)",
                         borderRadius: rf(12),
                         borderWidth: 1,
-                        borderColor: "#d33",
+                        borderColor: "#D6455D",
                         paddingVertical: rf(10),
                         alignItems: "center",
                       }}
                     >
                       <Text
                         style={{
-                          color: "#d33",
+                          color: "#D6455D",
                           fontWeight: "900",
                           fontSize: rf(14),
                         }}
@@ -1241,7 +1241,7 @@ export default function CalendarScreen({ navigation }) {
                         textAlign: "center",
                         fontWeight: "700",
                         fontSize: rf(13),
-                        color: "#2e7d32",
+                        color: "#4CAF50",
                       }}
                     >
                       יש לך כרגע זכות ראשונים על השעה הזאת 🕒
@@ -1312,14 +1312,14 @@ export default function CalendarScreen({ navigation }) {
                         backgroundColor: "rgba(255,255,255,0.95)",
                         borderRadius: rf(12),
                         borderWidth: 1,
-                        borderColor: "#d33",
+                        borderColor: "#D6455D",
                         paddingVertical: rf(10),
                         alignItems: "center",
                       }}
                     >
                       <Text
                         style={{
-                          color: "#d33",
+                          color: "#D6455D",
                           fontWeight: "900",
                           fontSize: rf(14),
                         }}

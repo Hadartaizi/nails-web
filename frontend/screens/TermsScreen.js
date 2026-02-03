@@ -357,7 +357,7 @@ export default function TermsScreen({ navigation }) {
                 style={{
                   marginTop: 12,
                   backgroundColor: hasAcceptedCurrentVersion
-                    ? "#2e7d32"
+                    ? "#4CAF50"
                     : colors.primary,
                   paddingVertical: 12,
                   borderRadius: 10,
