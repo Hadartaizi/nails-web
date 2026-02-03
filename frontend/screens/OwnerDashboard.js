@@ -28,15 +28,20 @@ import {
   serverTimestamp,
   orderBy,
   deleteDoc,
+  setDoc, 
 } from "firebase/firestore";
 
 import { signOut } from "firebase/auth";
-import { auth, db } from "../firebaseConfig";
 import globalStyles from "../styles/global";
 import colors from "../styles/colors";
+import { auth, db } from "../firebaseConfig"; // 👈 להוסיף storage פה
 import {
   sendAppointmentEmail,sendAppointmentRejectedEmail, sendAppointmentCancelledEmail,
 } from "../emailReminder";
+
+// 👇 חדש:
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 
 
 function showAlert(title, message, buttons) {
@@ -439,9 +444,17 @@ export default function OwnerDashboard({ navigation }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   // ✅ עריכת תקנון
-const [termsModalOpen, setTermsModalOpen] = useState(false);
-const [termsText, setTermsText] = useState(DEFAULT_TERMS_TEXT);
-const [termsVersion, setTermsVersion] = useState(1);
+  const [termsModalOpen, setTermsModalOpen] = useState(false);
+  const [termsText, setTermsText] = useState(DEFAULT_TERMS_TEXT);
+  const [termsVersion, setTermsVersion] = useState(1);
+
+ // ✅ עריכת תמונות רקע
+  const [backgroundsModalOpen, setBackgroundsModalOpen] = useState(false);
+  const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState("");
+  const [backgroundOpenRegisAppUrl, setBackgroundOpenRegisAppUrl] = useState("");
+
+// 👇 חדש: סטייט לטעינה
+const [backgroundUploading, setBackgroundUploading] = useState(false);
 
 
   useEffect(() => {
@@ -483,8 +496,16 @@ const [termsVersion, setTermsVersion] = useState(1);
         const fallbackHours = ["15:00", "16:00", "17:00", "18:00", "19:00"];
         const fallbackServices = [
           { id: "manicure", name: "מניקור", durationMin: 50 },
-          { id: "anatomical_structure_short", name: "מבנה אנטומי לציפורניים קצרות", durationMin: 180 },
-          { id: "gel_refill_long", name: "מילוי ג׳ל לציפורניים ארוכות", durationMin: 210 },
+          {
+            id: "anatomical_structure_short",
+            name: "מבנה אנטומי לציפורניים קצרות",
+            durationMin: 180,
+          },
+          {
+            id: "gel_refill_long",
+            name: "מילוי ג׳ל לציפורניים ארוכות",
+            durationMin: 210,
+          },
           { id: "tips_refill", name: "מילוי בטיפסים", durationMin: 60 },
           { id: "gel_build", name: "בניה חדשה", durationMin: 240 },
           { id: "nail_repair", name: "השלמת ציפורן", durationMin: 20 },
@@ -497,6 +518,10 @@ const [termsVersion, setTermsVersion] = useState(1);
           setDefaultText(fallbackHours.join("\n"));
           // טיפולים ברירת מחדל לעריכה
           setServices(fallbackServices);
+
+          // ✅ אם אין מסמך – גם מאפסים רקעים (ריק = השתמש ברירת מחדל מתוך האפליקציה)
+          setBackgroundAllAppUrl("");
+          setBackgroundOpenRegisAppUrl("");
           return;
         }
 
@@ -530,9 +555,25 @@ const [termsVersion, setTermsVersion] = useState(1);
           setServicesInitial(mappedFallback);
         }
 
+        // ✅ תמונות רקע (כאן הכנסה של סעיף 2)
+        const bgAll =
+          typeof data.backgroundAllAppUrl === "string"
+            ? data.backgroundAllAppUrl
+            : "";
+        const bgOpen =
+          typeof data.backgroundOpenRegisAppUrl === "string"
+            ? data.backgroundOpenRegisAppUrl
+            : "";
+
+        setBackgroundAllAppUrl(bgAll);
+        setBackgroundOpenRegisAppUrl(bgOpen);
       },
       (err) => {
-        console.log("❌ settings/business listen error:", err?.code, err?.message);
+        console.log(
+          "❌ settings/business listen error:",
+          err?.code,
+          err?.message
+        );
         const fallbackHours = ["15:00", "16:00", "17:00", "18:00", "19:00"];
         const fallbackServices = [
           { id: "manicure", name: "מניקור", durationMin: "50" },
@@ -542,10 +583,15 @@ const [termsVersion, setTermsVersion] = useState(1);
         setDefaultText(fallbackHours.join("\n"));
         setServices(fallbackServices);
         setServicesInitial(fallbackServices);
+
+        // במקרה של שגיאה – נשארים בלי URL כדי שייפול לברירת מחדל
+        setBackgroundAllAppUrl("");
+        setBackgroundOpenRegisAppUrl("");
       }
     );
     return () => unsub();
   }, []);
+
 
   // ✅ מאזין לתקנון – settings/terms
 useEffect(() => {
@@ -838,6 +884,100 @@ useEffect(() => {
       showAlert("שגיאה", e?.message || "לא הצליח לשמור ברירת מחדל");
     }
   }
+
+async function pickAndUploadBackground(kind) {
+  // kind יכול להיות "openRegis" או "allApp"
+
+  if (!auth.currentUser?.uid) {
+    showAlert("צריך להתחבר", "כדי לשנות תמונת רקע צריך להתחבר.");
+    return;
+  }
+
+  try {
+    // 1️⃣ הרשאות – במובייל בלבד
+    if (Platform.OS !== "web") {
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        showAlert(
+          "שגיאה",
+          "צריך לאשר גישה לגלריה בהגדרות המכשיר."
+        );
+        return;
+      }
+    }
+
+    // 2️⃣ בחירת תמונה – אותו רעיון כמו בגלריה
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+      allowsEditing: true,
+    });
+
+    if (!res || res.canceled || !res.assets || !res.assets.length) {
+      return;
+    }
+
+    const asset = res.assets[0];
+    if (!asset.uri) {
+      showAlert("שגיאה", "לא נמצאה כתובת לתמונה");
+      return;
+    }
+
+    // 3️⃣ מתחילים "העלאה" – למעשה עיבוד + כתיבה ל-Firestore
+    setBackgroundUploading(true);
+
+    try {
+      // מקטינים קצת כמו בגלריה
+      const manipulated = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: 900 } }],
+        {
+          compress: 0.7,
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true,
+        }
+      );
+
+      if (!manipulated?.base64) {
+        showAlert("שגיאה", "לא הצליח לעבד את התמונה");
+        return;
+      }
+
+      const dataUrl = `data:image/jpeg;base64,${manipulated.base64}`;
+
+      // 4️⃣ שמירה ל-Firestore (בלי Storage)
+      await setDoc(
+        doc(db, "settings", "business"),
+        kind === "openRegis"
+          ? { backgroundOpenRegisAppUrl: dataUrl }
+          : { backgroundAllAppUrl: dataUrl },
+        { merge: true }
+      );
+
+      // מעדכנים גם ב-state כדי שתראי את זה מיד
+      if (kind === "openRegis") {
+        setBackgroundOpenRegisAppUrl(dataUrl);
+      } else {
+        setBackgroundAllAppUrl(dataUrl);
+      }
+
+      showAlert("בוצע", "תמונת הרקע עודכנה בהצלחה");
+    } finally {
+      setBackgroundUploading(false);
+    }
+  } catch (e) {
+    console.log("❌ pickAndUploadBackground error:", e);
+    showAlert("שגיאה", e?.message || "לא הצליח להעלות תמונה");
+    setBackgroundUploading(false);
+  }
+}
+
+
+
+
+
+
 
   async function saveAvailabilityForDate() {
     const hours = parseHoursText(availabilityText);
@@ -1904,6 +2044,16 @@ const termsColor = acceptedLatest ? "#2e7d32" : "#d32f2f";
                     }}
                   />
 
+                   {/* ✅ שינוי תמונות רקע של האפליקציה */}
+                  <MenuItem
+                    text="שינוי תמונות רקע"
+                    onPress={() => {
+                      setMenuOpen(false);
+                      Keyboard.dismiss();
+                      setBackgroundsModalOpen(true);
+                    }}
+                  />
+
                   <MenuItem
                     text="התנתקות"
                     danger
@@ -2299,6 +2449,165 @@ const termsColor = acceptedLatest ? "#2e7d32" : "#d32f2f";
           </TouchableWithoutFeedback>
         </Modal>
 
+         {/* Modal: שינוי תמונות רקע – רק מהגלריה, בלי קישורים */}
+        <Modal
+          visible={backgroundsModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setBackgroundsModalOpen(false)}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+                justifyContent: "center",
+              }}
+            >
+              <TouchableWithoutFeedback>
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                    maxHeight: "80%",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: responsiveFont(18),
+                      textAlign: "center",
+                    }}
+                  >
+                    שינוי תמונות רקע
+                  </Text>
+
+                  <ScrollView
+                    style={{ marginTop: 10, maxHeight: 260 }}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {/* רקע מסך פתיחת המערכת */}
+                    <Text
+                      style={{
+                        textAlign: "right",
+                        fontWeight: "800",
+                        marginBottom: 4,
+                        marginTop: 8,
+                      }}
+                    >
+                      תמונת רקע למסך פתיחת המערכת
+                    </Text>
+
+                    <Pressable
+                      onPress={() => pickAndUploadBackground("openRegis")}
+                      disabled={backgroundUploading}
+                      style={({ pressed }) => [
+                        {
+                          marginTop: 4,
+                          alignSelf: "flex-start",
+                          backgroundColor: backgroundUploading
+                            ? "#ccc"
+                            : colors.primary,
+                          paddingVertical: 10,
+                          paddingHorizontal: 16,
+                          borderRadius: 999,
+                          opacity: pressed ? 0.88 : 1,
+                        },
+                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: "white",
+                          fontWeight: "900",
+                        }}
+                      >
+                        בחרי תמונה מהגלריה
+                      </Text>
+                    </Pressable>
+
+                    {/* רקע כל האפליקציה */}
+                    <Text
+                      style={{
+                        textAlign: "right",
+                        fontWeight: "800",
+                        marginBottom: 4,
+                        marginTop: 16,
+                      }}
+                    >
+                      תמונת רקע לכל האפליקציה
+                    </Text>
+
+                    <Pressable
+                      onPress={() => pickAndUploadBackground("allApp")}
+                      disabled={backgroundUploading}
+                      style={({ pressed }) => [
+                        {
+                          marginTop: 4,
+                          alignSelf: "flex-start",
+                          backgroundColor: backgroundUploading
+                            ? "#ccc"
+                            : colors.primary,
+                          paddingVertical: 10,
+                          paddingHorizontal: 16,
+                          borderRadius: 999,
+                          opacity: pressed ? 0.88 : 1,
+                        },
+                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: "white",
+                          fontWeight: "900",
+                        }}
+                      >
+                        בחרי תמונה מהגלריה
+                      </Text>
+                    </Pressable>
+
+                    {backgroundUploading ? (
+                      <Text
+                        style={{
+                          marginTop: 12,
+                          textAlign: "right",
+                          color: "#777",
+                          fontWeight: "700",
+                        }}
+                      >
+                        מעלה תמונה... זה יכול לקחת כמה שניות
+                      </Text>
+                    ) : null}
+                  </ScrollView>
+
+                  <Pressable
+                    onPress={() => setBackgroundsModalOpen(false)}
+                    style={({ pressed }) => [
+                      {
+                        backgroundColor: "#444",
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 10,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
+                    <Text style={{ color: "white", fontWeight: "900" }}>
+                      סגור
+                    </Text>
+                  </Pressable>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
 
         {/* Modal: שריון ידני */}
         <Modal visible={manualModalOpen} transparent animationType="slide" onRequestClose={() => setManualModalOpen(false)}>

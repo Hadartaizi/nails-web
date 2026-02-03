@@ -6,6 +6,7 @@ import {
   getReactNativePersistence,
 } from "firebase/auth";
 import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { getStorage } from "firebase/storage"; // 👈 חדש
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
@@ -38,6 +39,9 @@ if (Platform.OS === "web") {
 
 // -------- Firestore --------
 const db = getFirestore(app);
+
+// -------- Storage --------
+const storage = getStorage(app); // 👈 זה מה שמאפשר לנו להעלות תמונות
 
 // -------- WEB PUSH (firebase/messaging – Web בלבד) --------
 let messaging = null;
@@ -145,4 +149,4 @@ export async function setupWebPushForCurrentUser() {
 }
 
 // ---- מה שמייצאים החוצה ----
-export { app, auth, db, messaging, getToken, onMessage };
+export { app, auth, db, messaging, getToken, onMessage, storage };

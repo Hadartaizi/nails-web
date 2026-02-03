@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// frontend/screens/RegistrationScreen.js
+import React, { useState, useEffect } from "react";
 import {
   Text,
   TextInput,
@@ -9,16 +10,17 @@ import {
   View,
   Platform,
   ImageBackground,
+  ActivityIndicator,
 } from "react-native";
 
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "../firebaseConfig";
 import colors from "../styles/colors";
 
-// 👇 אותו רקע כמו בלוגין
-import bgImage from "../assets/backgroundOpenRegisApp.jpg";
+// 👇 תמונת ברירת מחדל (אם אין רקע מה־Firestore)
+import bgImageFallback from "../assets/backgroundOpenRegisApp.jpg";
 
 // ✅ אותו ניקוי אימייל כמו בלוגין
 function cleanEmail(raw) {
@@ -26,6 +28,15 @@ function cleanEmail(raw) {
     .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
     .trim()
     .toLowerCase();
+}
+
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
 }
 
 export default function RegistrationScreen({ navigation }) {
@@ -36,6 +47,43 @@ export default function RegistrationScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ✅ רקע דינמי – אותו כמו במסך הכניסה (settings/business.backgroundOpenRegisAppUrl)
+  const [bgUrl, setBgUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    const ref = doc(db, "settings", "business");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBgUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundOpenRegisAppUrl === "string" &&
+          data.backgroundOpenRegisAppUrl.trim()
+            ? data.backgroundOpenRegisAppUrl.trim()
+            : null;
+
+        setBgUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log(
+          "❌ register background listen error:",
+          err?.code,
+          err?.message
+        );
+        setBgUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+    return () => unsub();
+  }, []);
 
   // UID של בעלת המערכת
   const OWNER_UID = "iHJ54AXLKfhMdoRX3bWek01PqhO2";
@@ -103,12 +151,30 @@ export default function RegistrationScreen({ navigation }) {
     }
   };
 
+  // 💡 עד ש־Firestore לא החזיר תשובה – לא מציגים רקע ישן
+  if (bgUrl === undefined) {
+    return (
+      <View
+        style={[
+          styles.bg,
+          {
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "#fff",
+          },
+        ]}
+      >
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const bgSource = bgUrl
+    ? { uri: normalizeImgUri(bgUrl, bgUpdatedAt) }
+    : bgImageFallback;
+
   return (
-    <ImageBackground
-      source={bgImage}
-      style={styles.bg}
-      resizeMode="cover"
-    >
+    <ImageBackground source={bgSource} style={styles.bg} resizeMode="cover">
       {/* שכבת לבן שקוף שמכסה את כל המסך, כמו בלוגין */}
       <View style={styles.overlay}>
         <ScrollView
@@ -159,7 +225,7 @@ export default function RegistrationScreen({ navigation }) {
 
           <Text style={styles.label}>🔒 סיסמה</Text>
 
-          {/* ===== סיסמה + עין ===== */}
+          {/* ===== סיסמה + "הצג/הסתר" כמו בלוגין ===== */}
           <View style={styles.passwordWrapper}>
             <TextInput
               value={password}
@@ -176,11 +242,17 @@ export default function RegistrationScreen({ navigation }) {
               style={styles.eyeButton}
               hitSlop={10}
             >
-              <Ionicons
-                name={showPassword ? "eye" : "eye-off"}
-                size={22}
-                color={colors.primary}
-              />
+              {Platform.OS === "web" ? (
+                <Text style={styles.webToggle}>
+                  {showPassword ? "הסתר" : "הצג"}
+                </Text>
+              ) : (
+                <Ionicons
+                  name={showPassword ? "eye" : "eye-off"}
+                  size={22}
+                  color={colors.primary}
+                />
+              )}
             </Pressable>
           </View>
 
@@ -214,10 +286,9 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%", // לעזור גם בווב
   },
-  // שכבה שמכסה את כל המסך בלבן שקוף מעל הרקע
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(255, 255, 255, 0.5)", // אפשר להעלות ל-0.7/0.8 אם רוצים פחות שקוף
+    backgroundColor: "rgba(255, 255, 255, 0.5)",
   },
   container: {
     flexGrow: 1,
@@ -278,6 +349,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: "center",
     alignItems: "center",
+    minWidth: 44,
+  },
+  webToggle: {
+    color: colors.primary,
+    fontWeight: "800",
+    fontSize: 14,
   },
   button: {
     backgroundColor: colors.primary,

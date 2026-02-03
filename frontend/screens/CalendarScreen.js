@@ -9,6 +9,9 @@ import {
   Modal,
   useWindowDimensions,
   ScrollView,
+  ImageBackground,
+  StyleSheet,
+  ActivityIndicator,
 } from "react-native";
 
 import { Calendar } from "react-native-calendars";
@@ -32,7 +35,18 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 import { ensureHoldIfNeeded } from "./DayScreen";
 import colors from "../styles/colors";
-import AppBackground from "../components/AppBackground"; // ✅ תמונת רקע
+
+// 👇 תמונת ברירת מחדל כמו במסך הבית
+const BG_FALLBACK = require("../assets/backgroundOpenRegisApp.jpg");
+
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
 
 // ---------- helpers ----------
 function toLocalDateTime(dateStr, hourStr) {
@@ -80,6 +94,45 @@ function showMsg(title, msg) {
 export default function CalendarScreen({ navigation }) {
   const { width } = useWindowDimensions();
 
+  // ====== רקע דינמי לכל האפליקציה (backgroundAllAppUrl) ======
+  // undefined = עדיין לא נטען, null = אין ערך, string = URL
+  const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    // כמו ב-BusinessHomeScreen – settings/business
+    const ref = doc(db, "settings", "business");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBackgroundAllAppUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundAllAppUrl === "string" &&
+          data.backgroundAllAppUrl.trim()
+            ? data.backgroundAllAppUrl.trim()
+            : null;
+
+        setBackgroundAllAppUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log(
+          "❌ app backgrounds (business doc) listen error:",
+          err?.code,
+          err?.message
+        );
+        setBackgroundAllAppUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+    return () => unsub();
+  }, []);
+
   // responsive font helper
   const rf = useMemo(() => {
     return (base) => {
@@ -100,8 +153,7 @@ export default function CalendarScreen({ navigation }) {
   // ✅ גרסת תקנון מהשרת + מה שהמשתמש אישר
   const [termsVersion, setTermsVersion] = useState(1);
   const [userTermsAccepted, setUserTermsAccepted] = useState(false);
-  const [userTermsAcceptedVersion, setUserTermsAcceptedVersion] =
-    useState(0);
+  const [userTermsAcceptedVersion, setUserTermsAcceptedVersion] = useState(0);
 
   const [myRes, setMyRes] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -312,7 +364,7 @@ export default function CalendarScreen({ navigation }) {
           } else if (serviceLabel) {
             baseText = `התור שלך ל${serviceLabel} בוטל ע"י בעלת העסק.`;
           } else {
-            baseText = 'התור שלך בוטל ע"י בעלת העסק.';
+            baseText = "התור שלך בוטל ע\"י בעלת העסק.";
           }
 
           const fullText = `${baseText}\n\nניתן לקבוע תור חדש מהיומן.`;
@@ -329,7 +381,10 @@ export default function CalendarScreen({ navigation }) {
                 onPress: () => {
                   updateDoc(userResRef, { cancelledAlertShown: true }).catch(
                     (e) =>
-                      console.log("❌ update cancelledAlertShown:", e?.message)
+                      console.log(
+                        "❌ update cancelledAlertShown:",
+                        e?.message
+                      )
                   );
                 },
               },
@@ -515,8 +570,7 @@ export default function CalendarScreen({ navigation }) {
   // ✅ תור פעיל בלבד (pending / approved) – זה מה שמוצג ב"התור שלי"
   const activeRes = useMemo(
     () =>
-      myRes &&
-      (myRes.status === "pending" || myRes.status === "approved")
+      myRes && (myRes.status === "pending" || myRes.status === "approved")
         ? myRes
         : null,
     [myRes]
@@ -747,351 +801,199 @@ export default function CalendarScreen({ navigation }) {
       ? "ממתין לאישור ⏳"
       : activeRes?.status || "—";
 
-  return (
-    <AppBackground>
-      {/* שימי לב: אין כאן View עוטף עם רקע, רק ScrollView על התמונה */}
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        style={{ flex: 1, backgroundColor: "transparent" }}
-        contentContainerStyle={{
-          flexGrow: 1,
-          paddingHorizontal: 16,
-          paddingTop: 16,
-          paddingBottom: rf(24),
-        }}
-      >
-        {/* Header */}
-        <View
-          style={{
-            marginBottom: rf(20),
-            paddingVertical: rf(16),
-            paddingHorizontal: rf(14),
-            backgroundColor: "rgba(255,255,255,0.92)",
-            borderRadius: rf(14),
-            borderWidth: 1,
-            borderColor: colors.border,
+  // 💡 עד ש-backgroundAllAppUrl לא נטען – לא מציגים רקע ישן
+  if (backgroundAllAppUrl === undefined) {
+    return (
+      <View
+        style={[
+          styles.bg,
+          {
+            justifyContent: "center",
             alignItems: "center",
-            position: "relative",
+            backgroundColor: "#fff",
+          },
+        ]}
+      >
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const bgSource = backgroundAllAppUrl
+    ? { uri: normalizeImgUri(backgroundAllAppUrl, bgUpdatedAt) }
+    : BG_FALLBACK;
+
+  return (
+    <ImageBackground source={bgSource} style={styles.bg} resizeMode="cover">
+      {/* שכבת לבן שקוף מעל הרקע (כמו במסך הבית) */}
+      <View style={styles.overlay}>
+        {/* שימי לב: אין כאן View עוטף עם רקע, רק ScrollView על התמונה */}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          style={{ flex: 1, backgroundColor: "transparent" }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            paddingHorizontal: 16,
+            paddingTop: 16,
+            paddingBottom: rf(24),
           }}
         >
-          <Pressable
-            onPress={() => setMenuOpen(true)}
+          {/* Header */}
+          <View
             style={{
-              position: "absolute",
-              top: rf(10),
-              right: rf(10),
-              width: rf(42),
-              height: rf(42),
-              borderRadius: rf(12),
-              backgroundColor: "rgba(255,255,255,0.95)",
+              marginBottom: rf(20),
+              paddingVertical: rf(16),
+              paddingHorizontal: rf(14),
+              backgroundColor: "rgba(255,255,255,0.92)",
+              borderRadius: rf(14),
               borderWidth: 1,
               borderColor: colors.border,
               alignItems: "center",
-              justifyContent: "center",
-              ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
+              position: "relative",
             }}
-            accessibilityLabel="פתח תפריט"
           >
-            <View
+            <Pressable
+              onPress={() => setMenuOpen(true)}
               style={{
-                width: rf(18),
-                height: 2,
-                backgroundColor: colors.primary,
-                marginVertical: 2,
-                borderRadius: 2,
+                position: "absolute",
+                top: rf(10),
+                right: rf(10),
+                width: rf(42),
+                height: rf(42),
+                borderRadius: rf(12),
+                backgroundColor: "rgba(255,255,255,0.95)",
+                borderWidth: 1,
+                borderColor: colors.border,
+                alignItems: "center",
+                justifyContent: "center",
+                ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
               }}
-            />
-            <View
-              style={{
-                width: rf(18),
-                height: 2,
-                backgroundColor: colors.primary,
-                marginVertical: 2,
-                borderRadius: 2,
-              }}
-            />
-            <View
-              style={{
-                width: rf(18),
-                height: 2,
-                backgroundColor: colors.primary,
-                marginVertical: 2,
-                borderRadius: 2,
-              }}
-            />
-          </Pressable>
+              accessibilityLabel="פתח תפריט"
+            >
+              <View
+                style={{
+                  width: rf(18),
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
+              <View
+                style={{
+                  width: rf(18),
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
+              <View
+                style={{
+                  width: rf(18),
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
+            </Pressable>
 
-          <Text
-            style={{
-              fontSize: rf(26),
-              fontWeight: "900",
-              color: colors.primary,
-              textAlign: "center",
-            }}
-          >
-            קביעת תור
-          </Text>
-
-          <Text
-            style={{
-              marginTop: rf(6),
-              fontSize: rf(15),
-              color: colors.textDark,
-              textAlign: "center",
-              fontWeight: "600",
-            }}
-          >
-            בחרי תאריך ביומן כדי להמשיך
-          </Text>
-
-          <Text
-            style={{
-              marginTop: rf(6),
-              color: "#666",
-              fontWeight: "700",
-              textAlign: "center",
-            }}
-          >
-            נקודה מתחת ליום = שעות מיוחדות שהוגדרו ידנית
-          </Text>
-        </View>
-
-        {/* Calendar */}
-        <View
-          style={{
-            backgroundColor: "rgba(255,255,255,0.9)",
-            borderRadius: rf(16),
-            borderWidth: 1,
-            borderColor: colors.border,
-            padding: rf(10),
-          }}
-        >
-          <Calendar
-            minDate={today}
-            markedDates={markedDates}
-            onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
-            onDayPress={(day) => {
-              if (!hasAcceptedLatestTerms) {
-                const msg =
-                  "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
-
-                if (Platform.OS === "web") {
-                  window.alert(msg);
-                  navigation.navigate("Terms");
-                } else {
-                  Alert.alert("נדרש אישור תקנון", msg, [
-                    {
-                      text: "מעבר לתקנון",
-                      onPress: () => navigation.navigate("Terms"),
-                    },
-                  ]);
-                }
-                return;
-              }
-
-              navigation.navigate("Day", {
-                selectedDate: day.dateString,
-                date: day.dateString,
-                requireApproval: true,
-              });
-            }}
-            style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
-            theme={{
-              calendarBackground: "transparent",
-              todayTextColor: colors.secondary,
-              selectedDayBackgroundColor: colors.primary,
-              selectedDayTextColor: "#fff",
-              arrowColor: colors.primary,
-              monthTextColor: colors.primary,
-              textMonthFontWeight: "900",
-              textDayFontWeight: "600",
-              textDayHeaderFontWeight: "700",
-              textDisabledColor: "#d9e1e8",
-              textMonthFontSize: rf(16),
-              textDayFontSize: rf(14),
-              textDayHeaderFontSize: rf(12),
-            }}
-          />
-        </View>
-
-        {/* My Reservation */}
-        <View
-          style={{
-            marginTop: rf(12),
-            backgroundColor: "rgba(255,255,255,0.9)",
-            borderRadius: rf(14),
-            borderWidth: 1,
-            borderColor: colors.border,
-            paddingVertical: rf(12),
-            paddingHorizontal: rf(12),
-          }}
-        >
-          {/* כותרת + קו תחתון */}
-          <View
-            style={{
-              paddingBottom: rf(8),
-              borderBottomWidth: 1,
-              borderBottomColor: colors.border,
-            }}
-          >
             <Text
               style={{
+                fontSize: rf(26),
                 fontWeight: "900",
                 color: colors.primary,
-                fontSize: rf(16),
                 textAlign: "center",
               }}
             >
-              התור שלי
+              קביעת תור
+            </Text>
+
+            <Text
+              style={{
+                marginTop: rf(6),
+                fontSize: rf(15),
+                color: colors.textDark,
+                textAlign: "center",
+                fontWeight: "600",
+              }}
+            >
+              בחרי תאריך ביומן כדי להמשיך
+            </Text>
+
+            <Text
+              style={{
+                marginTop: rf(6),
+                color: "#666",
+                fontWeight: "700",
+                textAlign: "center",
+              }}
+            >
+              נקודה מתחת ליום = שעות מיוחדות שהוגדרו ידנית
             </Text>
           </View>
 
-          {!activeRes ? (
-            <Text
-              style={{
-                marginTop: rf(8),
-                textAlign: "center",
-                color: "gray",
-                fontWeight: "700",
-                fontSize: rf(14),
+          {/* Calendar */}
+          <View
+            style={{
+              backgroundColor: "rgba(255,255,255,0.9)",
+              borderRadius: rf(16),
+              borderWidth: 1,
+              borderColor: colors.border,
+              padding: rf(10),
+            }}
+          >
+            <Calendar
+              minDate={today}
+              markedDates={markedDates}
+              onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
+              onDayPress={(day) => {
+                if (!hasAcceptedLatestTerms) {
+                  const msg =
+                    "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
+
+                  if (Platform.OS === "web") {
+                    window.alert(msg);
+                    navigation.navigate("Terms");
+                  } else {
+                    Alert.alert("נדרש אישור תקנון", msg, [
+                      {
+                        text: "מעבר לתקנון",
+                        onPress: () => navigation.navigate("Terms"),
+                      },
+                    ]);
+                  }
+                  return;
+                }
+
+                navigation.navigate("Day", {
+                  selectedDate: day.dateString,
+                  date: day.dateString,
+                  requireApproval: true,
+                });
               }}
-            >
-              אין לך תור פעיל כרגע
-            </Text>
-          ) : (
-            <>
-              <Text
-                style={{
-                  marginTop: rf(8),
-                  textAlign: "center",
-                  color: colors.textDark,
-                  fontWeight: "900",
-                  fontSize: rf(16),
-                }}
-              >
-                {activeRes.date} • {activeRes.hour} {niceService}
-              </Text>
+              style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
+              theme={{
+                calendarBackground: "transparent",
+                todayTextColor: colors.secondary,
+                selectedDayBackgroundColor: colors.primary,
+                selectedDayTextColor: "#fff",
+                arrowColor: colors.primary,
+                monthTextColor: colors.primary,
+                textMonthFontWeight: "900",
+                textDayFontWeight: "600",
+                textDayHeaderFontWeight: "700",
+                textDisabledColor: "#d9e1e8",
+                textMonthFontSize: rf(16),
+                textDayFontSize: rf(14),
+                textDayHeaderFontSize: rf(12),
+              }}
+            />
+          </View>
 
-              <Text
-                style={{
-                  marginTop: 6,
-                  textAlign: "center",
-                  fontWeight: "900",
-                  color:
-                    activeRes.status === "approved" ? "#2e7d32" : "#ff8f00",
-                }}
-              >
-                סטטוס: {statusLabel}
-              </Text>
-
-              <View
-                style={{
-                  flexDirection: "row",
-                  gap: rf(10),
-                  marginTop: rf(12),
-                }}
-              >
-                <Pressable
-                  onPress={() => {
-                    if (!hasAcceptedLatestTerms) {
-                      const msg =
-                        "לפני קביעת תור חדש או שינוי תור יש לאשר את התקנון המעודכן במסך התקנון.";
-
-                      if (Platform.OS === "web") {
-                        const go = window.confirm(
-                          `${msg}\n\nלעבור למסך התקנון עכשיו?`
-                        );
-                        if (go) {
-                          navigation.navigate("Terms");
-                        }
-                      } else {
-                        Alert.alert("נדרש אישור תקנון", msg, [
-                          { text: "ביטול", style: "cancel" },
-                          {
-                            text: "מעבר לתקנון",
-                            onPress: () => navigation.navigate("Terms"),
-                          },
-                        ]);
-                      }
-                      return;
-                    }
-
-                    navigation.navigate("Day", {
-                      selectedDate: activeRes.date,
-                      date: activeRes.date,
-                      requireApproval: true,
-                    });
-                  }}
-                  style={{
-                    flex: 1,
-                    backgroundColor: "rgba(255,255,255,0.95)",
-                    borderRadius: rf(12),
-                    borderWidth: 1,
-                    borderColor: colors.primary,
-                    paddingVertical: rf(10),
-                    alignItems: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.primary,
-                      fontWeight: "900",
-                      fontSize: rf(14),
-                    }}
-                  >
-                    מעבר לתאריך
-                  </Text>
-                </Pressable>
-
-                {!passed ? (
-                  <Pressable
-                    onPress={() => {
-                      if (Platform.OS === "web") {
-                        const ok = window.confirm("לבטל את התור?");
-                        if (ok) cancelMyReservationFromCalendar();
-                        return;
-                      }
-
-                      Alert.alert("ביטול תור", "לבטל את התור?", [
-                        { text: "לא", style: "cancel" },
-                        {
-                          text: "כן",
-                          style: "destructive",
-                          onPress: cancelMyReservationFromCalendar,
-                        },
-                      ]);
-                    }}
-                    style={{
-                      flex: 1,
-                      backgroundColor: "rgba(255,255,255,0.95)",
-                      borderRadius: rf(12),
-                      borderWidth: 1,
-                      borderColor: "#d33",
-                      paddingVertical: rf(10),
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: "#d33",
-                        fontWeight: "900",
-                        fontSize: rf(14),
-                      }}
-                    >
-                      ביטול תור
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <View style={{ flex: 1 }} />
-                )}
-              </View>
-            </>
-          )}
-        </View>
-
-        {/* My Waitlists */}
-        {myWaitlistEntries.length > 0 && (
+          {/* My Reservation */}
           <View
             style={{
               marginTop: rf(12),
@@ -1119,69 +1021,83 @@ export default function CalendarScreen({ navigation }) {
                   textAlign: "center",
                 }}
               >
-                רשימת ההמתנה שלי
+                התור שלי
               </Text>
             </View>
 
-            {myWaitlistEntries.map((w, index) => (
-              <View
-                key={w.id}
+            {!activeRes ? (
+              <Text
                 style={{
-                  marginTop: index === 0 ? rf(4) : rf(8),
-                  paddingVertical: rf(6),
-                  borderTopWidth: index === 0 ? 0 : 1,
-                  borderTopColor: colors.border,
+                  marginTop: rf(8),
+                  textAlign: "center",
+                  color: "gray",
+                  fontWeight: "700",
+                  fontSize: rf(14),
                 }}
               >
+                אין לך תור פעיל כרגע
+              </Text>
+            ) : (
+              <>
                 <Text
                   style={{
+                    marginTop: rf(8),
                     textAlign: "center",
+                    color: colors.textDark,
                     fontWeight: "900",
                     fontSize: rf(16),
-                    color: colors.textDark,
                   }}
                 >
-                  {w.date} • {w.hour}
+                  {activeRes.date} • {activeRes.hour} {niceService}
                 </Text>
 
                 <Text
                   style={{
-                    marginTop: rf(3),
+                    marginTop: 6,
                     textAlign: "center",
-                    fontWeight: "700",
-                    fontSize: rf(13),
-                    color: "#555",
+                    fontWeight: "900",
+                    color:
+                      activeRes.status === "approved" ? "#2e7d32" : "#ff8f00",
                   }}
                 >
-                  {`המיקום שלך בתור הוא ${w.position}`}
+                  סטטוס: {statusLabel}
                 </Text>
-
-                {w.holdForMe && (
-                  <Text
-                    style={{
-                      marginTop: rf(2),
-                      textAlign: "center",
-                      fontWeight: "700",
-                      fontSize: rf(13),
-                      color: "#2e7d32",
-                    }}
-                  >
-                    יש לך כרגע זכות ראשונים על השעה הזאת 🕒
-                  </Text>
-                )}
 
                 <View
                   style={{
                     flexDirection: "row",
                     gap: rf(10),
-                    marginTop: rf(8),
+                    marginTop: rf(12),
                   }}
                 >
                   <Pressable
                     onPress={() => {
+                      if (!hasAcceptedLatestTerms) {
+                        const msg =
+                          "לפני קביעת תור חדש או שינוי תור יש לאשר את התקנון המעודכן במסך התקנון.";
+
+                        if (Platform.OS === "web") {
+                          const go = window.confirm(
+                            `${msg}\n\nלעבור למסך התקנון עכשיו?`
+                          );
+                          if (go) {
+                            navigation.navigate("Terms");
+                          }
+                        } else {
+                          Alert.alert("נדרש אישור תקנון", msg, [
+                            { text: "ביטול", style: "cancel" },
+                            {
+                              text: "מעבר לתקנון",
+                              onPress: () => navigation.navigate("Terms"),
+                            },
+                          ]);
+                        }
+                        return;
+                      }
+
                       navigation.navigate("Day", {
-                        selectedDate: w.date,
-                        date: w.date,
+                        selectedDate: activeRes.date,
+                        date: activeRes.date,
                         requireApproval: true,
                       });
                     }}
@@ -1206,140 +1122,315 @@ export default function CalendarScreen({ navigation }) {
                     </Text>
                   </Pressable>
 
-                  <Pressable
-                    onPress={() => {
-                      if (Platform.OS === "web") {
-                        const ok = window.confirm(
-                          "להסיר אותך מרשימת ההמתנה לשעה הזו?"
-                        );
-                        if (ok) cancelWaitlistEntry(w);
-                        return;
-                      }
+                  {!passed ? (
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === "web") {
+                          const ok = window.confirm("לבטל את התור?");
+                          if (ok) cancelMyReservationFromCalendar();
+                          return;
+                        }
 
-                      Alert.alert(
-                        "ביטול רשימת המתנה",
-                        "להסיר אותך מרשימת ההמתנה לשעה הזו?",
-                        [
+                        Alert.alert("ביטול תור", "לבטל את התור?", [
                           { text: "לא", style: "cancel" },
                           {
                             text: "כן",
                             style: "destructive",
-                            onPress: () => cancelWaitlistEntry(w),
+                            onPress: cancelMyReservationFromCalendar,
                           },
-                        ]
-                      );
-                    }}
-                    style={{
-                      flex: 1,
-                      backgroundColor: "rgba(255,255,255,0.95)",
-                      borderRadius: rf(12),
-                      borderWidth: 1,
-                      borderColor: "#d33",
-                      paddingVertical: rf(10),
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
+                        ]);
+                      }}
                       style={{
-                        color: "#d33",
-                        fontWeight: "900",
-                        fontSize: rf(14),
+                        flex: 1,
+                        backgroundColor: "rgba(255,255,255,0.95)",
+                        borderRadius: rf(12),
+                        borderWidth: 1,
+                        borderColor: "#d33",
+                        paddingVertical: rf(10),
+                        alignItems: "center",
                       }}
                     >
-                      ביטול מהרשימה
-                    </Text>
-                  </Pressable>
+                      <Text
+                        style={{
+                          color: "#d33",
+                          fontWeight: "900",
+                          fontSize: rf(14),
+                        }}
+                      >
+                        ביטול תור
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <View style={{ flex: 1 }} />
+                  )}
                 </View>
-              </View>
-            ))}
+              </>
+            )}
           </View>
-        )}
-      </ScrollView>
 
-      {/* Menu */}
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuOpen(false)}
-      >
-        <Pressable
-          onPress={() => setMenuOpen(false)}
-          style={{
-            flex: 1,
-            backgroundColor: "rgba(0,0,0,0.35)",
-            padding: rf(18),
-          }}
-        >
-          <Pressable
-            onPress={() => {}}
-            style={{
-              marginTop: rf(70),
-              alignSelf: "flex-end",
-              width: rf(220),
-              backgroundColor: "#fff",
-              borderRadius: rf(16),
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: rf(14),
-            }}
-          >
-            <Text
+          {/* My Waitlists */}
+          {myWaitlistEntries.length > 0 && (
+            <View
               style={{
-                fontWeight: "900",
-                color: colors.primary,
-                fontSize: rf(16),
-                textAlign: "center",
+                marginTop: rf(12),
+                backgroundColor: "rgba(255,255,255,0.9)",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                paddingVertical: rf(12),
+                paddingHorizontal: rf(12),
               }}
             >
-              תפריט
-            </Text>
+              {/* כותרת + קו תחתון */}
+              <View
+                style={{
+                  paddingBottom: rf(8),
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontWeight: "900",
+                    color: colors.primary,
+                    fontSize: rf(16),
+                    textAlign: "center",
+                  }}
+                >
+                  רשימת ההמתנה שלי
+                </Text>
+              </View>
 
-            <MenuItem
-              text="היסטוריית תורים"
-              onPress={() => {
-                setMenuOpen(false);
-                navigation.navigate("History");
+              {myWaitlistEntries.map((w, index) => (
+                <View
+                  key={w.id}
+                  style={{
+                    marginTop: index === 0 ? rf(4) : rf(8),
+                    paddingVertical: rf(6),
+                    borderTopWidth: index === 0 ? 0 : 1,
+                    borderTopColor: colors.border,
+                  }}
+                >
+                  <Text
+                    style={{
+                      textAlign: "center",
+                      fontWeight: "900",
+                      fontSize: rf(16),
+                      color: colors.textDark,
+                    }}
+                  >
+                    {w.date} • {w.hour}
+                  </Text>
+
+                  <Text
+                    style={{
+                      marginTop: rf(3),
+                      textAlign: "center",
+                      fontWeight: "700",
+                      fontSize: rf(13),
+                      color: "#555",
+                    }}
+                  >
+                    {`המיקום שלך בתור הוא ${w.position}`}
+                  </Text>
+
+                  {w.holdForMe && (
+                    <Text
+                      style={{
+                        marginTop: rf(2),
+                        textAlign: "center",
+                        fontWeight: "700",
+                        fontSize: rf(13),
+                        color: "#2e7d32",
+                      }}
+                    >
+                      יש לך כרגע זכות ראשונים על השעה הזאת 🕒
+                    </Text>
+                  )}
+
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      gap: rf(10),
+                      marginTop: rf(8),
+                    }}
+                  >
+                    <Pressable
+                      onPress={() => {
+                        navigation.navigate("Day", {
+                          selectedDate: w.date,
+                          date: w.date,
+                          requireApproval: true,
+                        });
+                      }}
+                      style={{
+                        flex: 1,
+                        backgroundColor: "rgba(255,255,255,0.95)",
+                        borderRadius: rf(12),
+                        borderWidth: 1,
+                        borderColor: colors.primary,
+                        paddingVertical: rf(10),
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: colors.primary,
+                          fontWeight: "900",
+                          fontSize: rf(14),
+                        }}
+                      >
+                        מעבר לתאריך
+                      </Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => {
+                        if (Platform.OS === "web") {
+                          const ok = window.confirm(
+                            "להסיר אותך מרשימת ההמתנה לשעה הזו?"
+                          );
+                          if (ok) cancelWaitlistEntry(w);
+                          return;
+                        }
+
+                        Alert.alert(
+                          "ביטול רשימת המתנה",
+                          "להסיר אותך מרשימת ההמתנה לשעה הזו?",
+                          [
+                            { text: "לא", style: "cancel" },
+                            {
+                              text: "כן",
+                              style: "destructive",
+                              onPress: () => cancelWaitlistEntry(w),
+                            },
+                          ]
+                        );
+                      }}
+                      style={{
+                        flex: 1,
+                        backgroundColor: "rgba(255,255,255,0.95)",
+                        borderRadius: rf(12),
+                        borderWidth: 1,
+                        borderColor: "#d33",
+                        paddingVertical: rf(10),
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: "#d33",
+                          fontWeight: "900",
+                          fontSize: rf(14),
+                        }}
+                      >
+                        ביטול מהרשימה
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Menu */}
+        <Modal
+          visible={menuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuOpen(false)}
+        >
+          <Pressable
+            onPress={() => setMenuOpen(false)}
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.35)",
+              padding: rf(18),
+            }}
+          >
+            <Pressable
+              onPress={() => {}}
+              style={{
+                marginTop: rf(70),
+                alignSelf: "flex-end",
+                width: rf(220),
+                backgroundColor: "#fff",
+                borderRadius: rf(16),
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: rf(14),
               }}
-            />
+            >
+              <Text
+                style={{
+                  fontWeight: "900",
+                  color: colors.primary,
+                  fontSize: rf(16),
+                  textAlign: "center",
+                }}
+              >
+                תפריט
+              </Text>
 
-            <MenuItem
-              text="מחירים"
-              onPress={() => {
-                setMenuOpen(false);
-                navigation.navigate("Prices");
-              }}
-            />
+              <MenuItem
+                text="היסטוריית תורים"
+                onPress={() => {
+                  setMenuOpen(false);
+                  navigation.navigate("History");
+                }}
+              />
 
-            <MenuItem
-              text="עמוד הבית של העסק"
-              onPress={() => {
-                setMenuOpen(false);
-                navigation.navigate("BusinessHome");
-              }}
-            />
+              <MenuItem
+                text="מחירים"
+                onPress={() => {
+                  setMenuOpen(false);
+                  navigation.navigate("Prices");
+                }}
+              />
 
-            <MenuItem
-              text="תקנון"
-              onPress={() => {
-                setMenuOpen(false);
-                navigation.navigate("Terms");
-              }}
-            />
+              <MenuItem
+                text="עמוד הבית של העסק"
+                onPress={() => {
+                  setMenuOpen(false);
+                  navigation.navigate("BusinessHome");
+                }}
+              />
 
-            <MenuItem
-              text="התנתקות"
-              danger
-              onPress={() => {
-                setMenuOpen(false);
-                confirmLogout();
-              }}
-            />
+              <MenuItem
+                text="תקנון"
+                onPress={() => {
+                  setMenuOpen(false);
+                  navigation.navigate("Terms");
+                }}
+              />
 
-            <MenuItem text="סגור" onPress={() => setMenuOpen(false)} />
+              <MenuItem
+                text="התנתקות"
+                danger
+                onPress={() => {
+                  setMenuOpen(false);
+                  confirmLogout();
+                }}
+              />
+
+              <MenuItem text="סגור" onPress={() => setMenuOpen(false)} />
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
-    </AppBackground>
+        </Modal>
+      </View>
+    </ImageBackground>
   );
 }
+
+const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.5)", // שכבה לבנה שקופה מעל הרקע
+  },
+});

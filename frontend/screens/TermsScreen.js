@@ -8,15 +8,15 @@ import {
   Platform,
   ActivityIndicator,
   BackHandler,
+  ImageBackground,
+  StyleSheet,
 } from "react-native";
 
 import { doc, serverTimestamp, setDoc, onSnapshot } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 import { auth, db } from "../firebaseConfig";
-import globalStyles from "../styles/global";
 import colors from "../styles/colors";
-import AppBackground from "../components/AppBackground";
 
 const DEFAULT_TERMS_TEXT = `
 איחורים / ביטולים:
@@ -37,6 +37,18 @@ const DEFAULT_TERMS_TEXT = `
 * התקנון עשוי להשתנות מעת לעת, ובכל שינוי משמעותי תתבקשי לאשר מחדש.
 `.trim();
 
+// 👇 רקע ברירת מחדל – כמו במסכים האחרים
+const BG_FALLBACK = require("../assets/backgroundOpenRegisApp.jpg");
+
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
+
 function showMsg(title, msg) {
   if (Platform.OS === "web") {
     window.alert(`${title}\n\n${msg || ""}`);
@@ -54,6 +66,44 @@ export default function TermsScreen({ navigation }) {
 
   const [alreadyAccepted, setAlreadyAccepted] = useState(false);
   const [alreadyAcceptedVersion, setAlreadyAcceptedVersion] = useState(0);
+
+  // ====== רקע דינמי לכל האפליקציה (backgroundAllAppUrl) ======
+  // undefined = עדיין לא נטען, null = אין ערך, string = URL
+  const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    const ref = doc(db, "settings", "business");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBackgroundAllAppUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundAllAppUrl === "string" &&
+          data.backgroundAllAppUrl.trim()
+            ? data.backgroundAllAppUrl.trim()
+            : null;
+
+        setBackgroundAllAppUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log(
+          "❌ app backgrounds (business doc) listen error:",
+          err?.code,
+          err?.message
+        );
+        setBackgroundAllAppUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+    return () => unsub();
+  }, []);
 
   // --- auth listener ---
   useEffect(() => {
@@ -195,120 +245,172 @@ export default function TermsScreen({ navigation }) {
     }
   }
 
-  // מצב טעינה – אפשר להשאיר עם globalStyles.container
-  if (loading) {
+  // 💡 עד שהרקע עוד לא נטען בכלל – מסך טעינה קטן
+  if (backgroundAllAppUrl === undefined) {
     return (
-      <AppBackground>
-        <View
-          style={[
-            globalStyles.container,
-            { alignItems: "center", backgroundColor: "transparent" },
-          ]}
-        >
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={{ marginTop: 10 }}>טוען תקנון…</Text>
-        </View>
-      </AppBackground>
+      <View
+        style={[
+          styles.bg,
+          {
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "#fff",
+          },
+        ]}
+      >
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 10 }}>טוען...</Text>
+      </View>
     );
   }
 
+  const bgSource = backgroundAllAppUrl
+    ? { uri: normalizeImgUri(backgroundAllAppUrl, bgUpdatedAt) }
+    : BG_FALLBACK;
+
   return (
-    <AppBackground>
-      {/* 👇 במקום globalStyles.container – מגדירים container מותאם בלי רקע סגול */}
-      <View
-        style={{
-          flex: 1,
-          paddingHorizontal: 16,
-          paddingTop: 16,
-          paddingBottom: 16,
-          backgroundColor: "transparent", // אין רקע סגול
-        }}
-      >
-        {/* כותרת */}
+    <ImageBackground source={bgSource} style={styles.bg} resizeMode="cover">
+      {/* שכבת לבן שקופה מעל הרקע – כמו בשאר המסכים */}
+      <View style={styles.overlay}>
         <View
           style={{
-            backgroundColor: "rgba(255,255,255,0.9)",
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 10,
-            borderWidth: 1,
-            borderColor: colors.border,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 22,
-              fontWeight: "900",
-              textAlign: "center",
-              color: colors.primary,
-            }}
-          >
-            תקנון המערכת
-          </Text>
-          <Text style={{ textAlign: "center", fontSize: 12, color: "#777" }}>
-            גרסה {termsVersion}
-          </Text>
-        </View>
-
-        {/* טקסט התקנון */}
-        <ScrollView
-          style={{
             flex: 1,
-            padding: 12,
-            backgroundColor: "rgba(255,255,255,0.92)", // לבן שקוף מאחורי הטקסט
-            borderRadius: 14,
-          }}
-          contentContainerStyle={{ paddingBottom: 8 }}
-        >
-          <Text
-            style={{
-              lineHeight: 22,
-              textAlign: "right",
-              writingDirection: "rtl",
-              color: "#222",
-            }}
-          >
-            {termsText}
-          </Text>
-        </ScrollView>
-
-        {/* כפתור אישור */}
-        <Pressable
-          onPress={hasAcceptedCurrentVersion ? null : handleAccept}
-          disabled={!userId || hasAcceptedCurrentVersion}
-          style={{
-            marginTop: 12,
-            backgroundColor: hasAcceptedCurrentVersion
-              ? "#2e7d32"
-              : colors.primary,
-            paddingVertical: 12,
-            borderRadius: 10,
-            alignItems: "center",
+            paddingHorizontal: 16,
+            paddingTop: 16,
+            paddingBottom: 16,
+            backgroundColor: "transparent",
           }}
         >
-          <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>
-            {hasAcceptedCurrentVersion
-              ? "התקנון אושר ✅"
-              : "אני מאשר/ת שקראתי את התקנון"}
-          </Text>
-        </Pressable>
+          {loading ? (
+            // 🔄 מצב טעינת תקנון / משתמש
+            <View
+              style={{
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={{ marginTop: 10 }}>טוען תקנון…</Text>
+            </View>
+          ) : (
+            <>
+              {/* כותרת */}
+              <View
+                style={{
+                  backgroundColor: "rgba(255,255,255,0.9)",
+                  borderRadius: 12,
+                  padding: 12,
+                  marginBottom: 10,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 22,
+                    fontWeight: "900",
+                    textAlign: "center",
+                    color: colors.primary,
+                  }}
+                >
+                  תקנון המערכת
+                </Text>
+                <Text
+                  style={{
+                    textAlign: "center",
+                    fontSize: 12,
+                    color: "#777",
+                    marginTop: 4,
+                  }}
+                >
+                  גרסה {termsVersion}
+                </Text>
+              </View>
 
-        {/* כפתור חזרה – סגול בלבד */}
-        {!mustAcceptNow && (
-          <Pressable
-            onPress={() => navigation.goBack()}
-            style={{
-              marginTop: 10,
-              backgroundColor: colors.primary, // סגול
-              paddingVertical: 10,
-              borderRadius: 10,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "900" }}>חזרה</Text>
-          </Pressable>
-        )}
+              {/* טקסט התקנון */}
+              <ScrollView
+                style={{
+                  flex: 1,
+                  padding: 12,
+                  backgroundColor: "rgba(255,255,255,0.92)", // לבן שקוף מאחורי הטקסט
+                  borderRadius: 14,
+                }}
+                contentContainerStyle={{ paddingBottom: 8 }}
+              >
+                <Text
+                  style={{
+                    lineHeight: 22,
+                    textAlign: "right",
+                    writingDirection: "rtl",
+                    color: "#222",
+                  }}
+                >
+                  {termsText}
+                </Text>
+              </ScrollView>
+
+              {/* כפתור אישור */}
+              <Pressable
+                onPress={hasAcceptedCurrentVersion ? null : handleAccept}
+                disabled={!userId || hasAcceptedCurrentVersion}
+                style={{
+                  marginTop: 12,
+                  backgroundColor: hasAcceptedCurrentVersion
+                    ? "#2e7d32"
+                    : colors.primary,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  alignItems: "center",
+                  opacity: !userId ? 0.7 : 1,
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#fff",
+                    fontWeight: "900",
+                    fontSize: 16,
+                  }}
+                >
+                  {hasAcceptedCurrentVersion
+                    ? "התקנון אושר ✅"
+                    : "אני מאשר/ת שקראתי את התקנון"}
+                </Text>
+              </Pressable>
+
+              {/* כפתור חזרה – רק אם לא חובה לאשר עכשיו */}
+              {!mustAcceptNow && (
+                <Pressable
+                  onPress={() => navigation.goBack()}
+                  style={{
+                    marginTop: 10,
+                    backgroundColor: colors.primary,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "900" }}>
+                    חזרה
+                  </Text>
+                </Pressable>
+              )}
+            </>
+          )}
+        </View>
       </View>
-    </AppBackground>
+    </ImageBackground>
   );
 }
+
+const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.5)", // שכבה לבנה שקופה מעל הרקע
+  },
+});

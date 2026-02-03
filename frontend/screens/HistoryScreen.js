@@ -7,14 +7,27 @@ import {
   Pressable,
   ActivityIndicator,
   useWindowDimensions,
+  ImageBackground,
+  StyleSheet,
 } from "react-native";
 
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
 import colors from "../styles/colors";
-import AppBackground from "../components/AppBackground"; // ✅ רקע תמונה
+
+// 👇 תמונת ברירת מחדל כמו בשאר המסכים
+const BG_FALLBACK = require("../assets/backgroundOpenRegisApp.jpg");
+
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
 
 // ✅ פונקציה יפה לשם סטטוס בעברית
 function getStatusLabel(status) {
@@ -75,6 +88,44 @@ export default function HistoryScreen({ navigation }) {
     return max;
   }, [height]);
 
+  // ====== רקע דינמי לכל האפליקציה (backgroundAllAppUrl) ======
+  // undefined = עדיין לא נטען, null = אין ערך, string = URL
+  const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    const ref = doc(db, "settings", "business");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBackgroundAllAppUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundAllAppUrl === "string" &&
+          data.backgroundAllAppUrl.trim()
+            ? data.backgroundAllAppUrl.trim()
+            : null;
+
+        setBackgroundAllAppUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log(
+          "❌ app backgrounds (business doc) listen error:",
+          err?.code,
+          err?.message
+        );
+        setBackgroundAllAppUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+    return () => unsub();
+  }, []);
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setUserId(user?.uid || null);
@@ -109,177 +160,214 @@ export default function HistoryScreen({ navigation }) {
     return () => unsub();
   }, [userId]);
 
-  return (
-    <AppBackground>
+  // 💡 עד ש-backgroundAllAppUrl לא נטען – מסך טעינה קטן
+  if (backgroundAllAppUrl === undefined) {
+    return (
       <View
-        style={{
-          flex: 1,
-          paddingHorizontal: 16,
-          paddingTop: 16,
-          paddingBottom: rf(24),
-          backgroundColor: "transparent",
-        }}
+        style={[
+          styles.bg,
+          {
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "#fff",
+          },
+        ]}
       >
-        {/* Header */}
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const bgSource = backgroundAllAppUrl
+    ? { uri: normalizeImgUri(backgroundAllAppUrl, bgUpdatedAt) }
+    : BG_FALLBACK;
+
+  return (
+    <ImageBackground source={bgSource} style={styles.bg} resizeMode="cover">
+      {/* שכבת לבן שקופה מעל הרקע (כמו בשאר המסכים) */}
+      <View style={styles.overlay}>
         <View
           style={{
-            marginBottom: rf(14),
-            paddingVertical: rf(14),
-            paddingHorizontal: rf(14),
-            backgroundColor: "rgba(255,255,255,0.92)",
-            borderRadius: rf(14),
-            borderWidth: 1,
-            borderColor: colors.border,
-            alignItems: "center",
+            flex: 1,
+            paddingHorizontal: 16,
+            paddingTop: 16,
+            paddingBottom: rf(24),
+            backgroundColor: "transparent",
           }}
         >
-          <Text
-            style={{
-              fontSize: rf(24),
-              fontWeight: "900",
-              color: colors.primary,
-              textAlign: "center",
-            }}
-          >
-            היסטוריית תורים
-          </Text>
-
-          <Text
-            style={{
-              marginTop: rf(6),
-              fontSize: rf(14),
-              color: colors.textDark,
-              textAlign: "center",
-              fontWeight: "600",
-            }}
-          >
-            כאן יופיעו כל התורים שעברו ✅
-          </Text>
-        </View>
-
-        {/* Content */}
-        {loading ? (
-          <View style={{ marginTop: rf(20), alignItems: "center" }}>
-            <ActivityIndicator size="large" />
-          </View>
-        ) : items.length === 0 ? (
+          {/* Header */}
           <View
             style={{
+              marginBottom: rf(14),
+              paddingVertical: rf(14),
+              paddingHorizontal: rf(14),
               backgroundColor: "rgba(255,255,255,0.92)",
               borderRadius: rf(14),
               borderWidth: 1,
               borderColor: colors.border,
-              padding: rf(16),
+              alignItems: "center",
             }}
           >
             <Text
               style={{
-                color: colors.textDark,
-                fontWeight: "700",
+                fontSize: rf(24),
+                fontWeight: "900",
+                color: colors.primary,
                 textAlign: "center",
-                fontSize: rf(14),
               }}
             >
-              אין לך עדיין תורים בהיסטוריה 🙂
+              היסטוריית תורים
+            </Text>
+
+            <Text
+              style={{
+                marginTop: rf(6),
+                fontSize: rf(14),
+                color: colors.textDark,
+                textAlign: "center",
+                fontWeight: "600",
+              }}
+            >
+              כאן יופיעו כל התורים שעברו ✅
             </Text>
           </View>
-        ) : (
-          <View
-            style={{
-              backgroundColor: "rgba(255,255,255,0.9)",
-              borderRadius: rf(14),
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: rf(10),
-              maxHeight: listMaxHeight, // ✅ מותאם לגובה המסך
-            }}
-          >
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: rf(8) }}
-            >
-              {items.map((a) => {
-                const serviceText = getServiceText(a);
-                const statusText = getStatusLabel(a.status);
 
-                return (
-                  <View
-                    key={a.id}
-                    style={{
-                      backgroundColor: "#fff",
-                      borderRadius: rf(14),
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                      padding: rf(14),
-                      marginBottom: rf(10),
-                    }}
-                  >
-                    <Text
+          {/* Content */}
+          {loading ? (
+            <View style={{ marginTop: rf(20), alignItems: "center" }}>
+              <ActivityIndicator size="large" />
+            </View>
+          ) : items.length === 0 ? (
+            <View
+              style={{
+                backgroundColor: "rgba(255,255,255,0.92)",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: rf(16),
+              }}
+            >
+              <Text
+                style={{
+                  color: colors.textDark,
+                  fontWeight: "700",
+                  textAlign: "center",
+                  fontSize: rf(14),
+                }}
+              >
+                אין לך עדיין תורים בהיסטוריה 🙂
+              </Text>
+            </View>
+          ) : (
+            <View
+              style={{
+                backgroundColor: "rgba(255,255,255,0.9)",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                padding: rf(10),
+                maxHeight: listMaxHeight, // ✅ מותאם לגובה המסך
+              }}
+            >
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: rf(8) }}
+              >
+                {items.map((a) => {
+                  const serviceText = getServiceText(a);
+                  const statusText = getStatusLabel(a.status);
+
+                  return (
+                    <View
+                      key={a.id}
                       style={{
-                        fontSize: rf(16),
-                        fontWeight: "900",
-                        color: colors.primary,
-                        textAlign: "right",
+                        backgroundColor: "#fff",
+                        borderRadius: rf(14),
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        padding: rf(14),
+                        marginBottom: rf(10),
                       }}
                     >
-                      {a.date || "—"}
-                      {a.hour ? ` • ${a.hour}` : ""}
-                    </Text>
+                      <Text
+                        style={{
+                          fontSize: rf(16),
+                          fontWeight: "900",
+                          color: colors.primary,
+                          textAlign: "right",
+                        }}
+                      >
+                        {a.date || "—"}
+                        {a.hour ? ` • ${a.hour}` : ""}
+                      </Text>
 
-                    {!!serviceText && (
+                      {!!serviceText && (
+                        <Text
+                          style={{
+                            marginTop: rf(6),
+                            color: colors.textDark,
+                            fontWeight: "700",
+                            textAlign: "right",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          טיפול: {serviceText}
+                        </Text>
+                      )}
+
                       <Text
                         style={{
                           marginTop: rf(6),
-                          color: colors.textDark,
+                          color: "gray",
                           fontWeight: "700",
                           textAlign: "right",
                           fontSize: rf(14),
                         }}
                       >
-                        טיפול: {serviceText}
+                        סטטוס: {statusText}
                       </Text>
-                    )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
 
-                    <Text
-                      style={{
-                        marginTop: rf(6),
-                        color: "gray",
-                        fontWeight: "700",
-                        textAlign: "right",
-                        fontSize: rf(14),
-                      }}
-                    >
-                      סטטוס: {statusText}
-                    </Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* Back */}
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={{
-            marginTop: rf(14),
-            backgroundColor: colors.primary,
-            paddingVertical: rf(12),
-            borderRadius: rf(14),
-            alignItems: "center",
-          }}
-        >
-          <Text
+          {/* Back */}
+          <Pressable
+            onPress={() => navigation.goBack()}
             style={{
-              color: "#fff",
-              fontWeight: "900",
-              fontSize: rf(15),
+              marginTop: rf(14),
+              backgroundColor: colors.primary,
+              paddingVertical: rf(12),
+              borderRadius: rf(14),
+              alignItems: "center",
             }}
           >
-            חזרה
-          </Text>
-        </Pressable>
+            <Text
+              style={{
+                color: "#fff",
+                fontWeight: "900",
+                fontSize: rf(15),
+              }}
+            >
+              חזרה
+            </Text>
+          </Pressable>
+        </View>
       </View>
-    </AppBackground>
+    </ImageBackground>
   );
 }
+
+const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.5)", // שכבה לבנה שקופה מעל הרקע
+  },
+});

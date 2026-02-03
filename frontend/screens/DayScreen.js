@@ -9,6 +9,8 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  ImageBackground,
+  StyleSheet,
 } from "react-native";
 
 import {
@@ -31,7 +33,18 @@ import {
   sendWaitlistHoldEmail,
   sendWaitlistExpiredEmail,
 } from "../emailReminder";
-import AppBackground from "../components/AppBackground"; // ✅ רקע תמונה
+
+// 👇 תמונת ברירת מחדל כמו בשאר המסכים
+const BG_FALLBACK = require("../assets/backgroundOpenRegisApp.jpg");
+
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
 
 // ================= helpers =================
 const FALLBACK_SLOT_MIN = 60;
@@ -126,7 +139,9 @@ function safeServices(list) {
       name: String(s?.name ?? "טיפול"),
       durationMin: Number(s?.durationMin ?? 0),
     }))
-    .filter((s) => s.name && Number.isFinite(s.durationMin) && s.durationMin > 0);
+    .filter(
+      (s) => s.name && Number.isFinite(s.durationMin) && s.durationMin > 0
+    );
 
   const used = new Map();
   return cleaned.map((s) => {
@@ -442,6 +457,44 @@ export default function DayScreen({ route, navigation }) {
   const [serviceHour, setServiceHour] = useState(null);
   const [selectedServiceIds, setSelectedServiceIds] = useState({});
 
+  // ====== רקע דינמי לכל האפליקציה (backgroundAllAppUrl) ======
+  // undefined = עדיין לא נטען, null = אין ערך, string = URL
+  const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  useEffect(() => {
+    const ref = doc(db, "settings", "business");
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBackgroundAllAppUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundAllAppUrl === "string" &&
+          data.backgroundAllAppUrl.trim()
+            ? data.backgroundAllAppUrl.trim()
+            : null;
+
+        setBackgroundAllAppUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log(
+          "❌ app backgrounds (business doc) listen error:",
+          err?.code,
+          err?.message
+        );
+        setBackgroundAllAppUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+    return () => unsub();
+  }, []);
+
   // ============ WAITLIST LOGIC ============
   async function toggleWaitlist(dateStr, hourStr) {
     if (!userId) {
@@ -617,7 +670,6 @@ export default function DayScreen({ route, navigation }) {
       (snap) => {
         const data = snap.exists() ? snap.data() : {};
         setDefaultHours(uniqSortedHours(data?.defaultHours || []));
-
         const srv = safeServices(data?.services);
         setServices(
           srv.length
@@ -744,14 +796,11 @@ export default function DayScreen({ route, navigation }) {
     const ids = Object.keys(selectedServiceIds).filter(
       (k) => selectedServiceIds[k]
     );
-
     const chosen = services.filter((s) => ids.includes(s.id));
-
     const total = chosen.reduce(
       (sum, s) => sum + (Number(s.durationMin) || 0),
       0
     );
-
     return { chosen, total };
   }, [selectedServiceIds, services]);
 
@@ -1005,43 +1054,43 @@ export default function DayScreen({ route, navigation }) {
         }
       });
 
-    const endTime = minToTime(timeToMin(startHour) + totalDurationMin);
+      const endTime = minToTime(timeToMin(startHour) + totalDurationMin);
 
-    try {
-      if (Platform.OS === "web") {
-        const toEmail = userEmail || auth.currentUser?.email || "";
-        const clientName = auth.currentUser?.displayName || "לקוחה";
+      try {
+        if (Platform.OS === "web") {
+          const toEmail = userEmail || auth.currentUser?.email || "";
+          const clientName = auth.currentUser?.displayName || "לקוחה";
 
-        if (toEmail) {
-          await sendAppointmentPendingEmail({
-            toEmail,
-            clientName,
-            date: selectedDate,
-            time: startHour,
-            businessName: "Rotem Studio Nails",
-            servicesSelected,
-          });
+          if (toEmail) {
+            await sendAppointmentPendingEmail({
+              toEmail,
+              clientName,
+              date: selectedDate,
+              time: startHour,
+              businessName: "Rotem Studio Nails",
+              servicesSelected,
+            });
+          } else {
+            console.log("⚠️ אין אימייל למשתמש – לא נשלח מייל נקלט");
+          }
         } else {
-          console.log("⚠️ אין אימייל למשתמש – לא נשלח מייל נקלט");
+          console.log("📧 דילוג על שליחת מייל – לא Web (iOS/Android)");
         }
-      } else {
-        console.log("📧 דילוג על שליחת מייל – לא Web (iOS/Android)");
+      } catch (mailErr) {
+        console.log("❌ sendAppointmentPendingEmail error:", mailErr);
       }
-    } catch (mailErr) {
-      console.log("❌ sendAppointmentPendingEmail error:", mailErr);
-    }
 
-    showAlert(
-      "הבקשה נשלחה ✅",
-      `נשלחה בקשה לאישור:\nהתחלה ${startHour} • סיום משוער ${endTime}\nנתפסו: ${slots.join(
-        ", "
-      )}`
-    );
-  } catch (e) {
-    console.log("❌ reserveHourWithServices error:", e);
-    showAlert("שגיאה", e?.message || "לא הצליח לשריין תור");
+      showAlert(
+        "הבקשה נשלחה ✅",
+        `נשלחה בקשה לאישור:\nהתחלה ${startHour} • סיום משוער ${endTime}\nנתפסו: ${slots.join(
+          ", "
+        )}`
+      );
+    } catch (e) {
+      console.log("❌ reserveHourWithServices error:", e);
+      showAlert("שגיאה", e?.message || "לא הצליח לשריין תור");
+    }
   }
-}
 
   async function cancelMyRequest(app) {
     if (!userId) return;
@@ -1181,386 +1230,423 @@ export default function DayScreen({ route, navigation }) {
     await ensureHoldIfNeeded(selectedDate, app.hour);
   }
 
-  // ================= UI =================
-  return (
-    <AppBackground>
+  // 💡 עד ש-backgroundAllAppUrl לא נטען – לא מציגים רקע ישן
+  if (backgroundAllAppUrl === undefined) {
+    return (
       <View
         style={[
-          globalStyles.container,
+          styles.bg,
           {
-            backgroundColor: "transparent", // ✅ שלא יסתיר את התמונה
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "#fff",
           },
         ]}
       >
-        {/* Header */}
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  const bgSource = backgroundAllAppUrl
+    ? { uri: normalizeImgUri(backgroundAllAppUrl, bgUpdatedAt) }
+    : BG_FALLBACK;
+
+  // ================= UI =================
+  return (
+    <ImageBackground source={bgSource} style={styles.bg} resizeMode="cover">
+      {/* שכבת לבן שקופה מעל הרקע */}
+      <View style={styles.overlay}>
         <View
-          style={{
-            paddingVertical: 12,
-            marginBottom: 10,
-            borderBottomWidth: 1,
-            borderBottomColor: colors.border,
-          }}
+          style={[
+            globalStyles.container,
+            {
+              backgroundColor: "transparent", // ✅ שלא יסתיר את התמונה
+            },
+          ]}
         >
-          <Text
-            style={{
-              fontSize: 22,
-              fontWeight: "900",
-              textAlign: "center",
-              color: colors.primary,
-            }}
-          >
-            תורים ליום {selectedDate}
-          </Text>
-
-          <Text
-            style={{
-              marginTop: 6,
-              textAlign: "center",
-              color: "#444",
-              fontWeight: "800",
-            }}
-          >
-            כל שריון נשלח לאישור בעלת העסק
-          </Text>
-        </View>
-
-        {loading ? (
-          <View style={{ marginTop: 30, alignItems: "center" }}>
-            <ActivityIndicator />
-            <Text style={{ marginTop: 10, color: "gray" }}>טוען שעות…</Text>
-          </View>
-        ) : hoursVisible.length === 0 ? (
-          <Text
-            style={{ textAlign: "center", color: "gray", marginTop: 30 }}
-          >
-            אין שעות זמינות ביום הזה. בחרי תאריך אחר.
-          </Text>
-        ) : (
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingBottom: 90 }}
-            showsVerticalScrollIndicator={false}
-          >
-            {hoursVisible.map((hour) => {
-              if (hiddenMineHours.has(hour)) {
-                return null;
-              }
-
-              const app = appointmentByHour[hour];
-              const isReserved = !!app;
-              const isMine = isReserved && app?.userId === userId;
-              const status = app?.status || null;
-
-              const canReserveBase =
-                !!userId &&
-                (!myRes?.appointmentId || myRes?.status === "rejected") &&
-                !isReserved &&
-                !isAppointmentPast(selectedDate, hour);
-
-              const canCancelRequest =
-                isMine &&
-                status === "pending" &&
-                app?.isHead &&
-                Array.isArray(app?.slots) &&
-                app.slots.length > 0;
-
-              const canCancelApproved =
-                isMine &&
-                status === "approved" &&
-                app?.isHead &&
-                Array.isArray(app?.slots) &&
-                app.slots.length > 0;
-
-              const w = waitlistsByHour[hour] || null;
-              const queue = Array.isArray(w?.queue) ? w.queue : [];
-
-              const myIdx = userId
-                ? queue.findIndex((x) => x?.userId === userId)
-                : -1;
-              const inWaitlist = myIdx >= 0;
-
-              const now = Date.now();
-              const hasHold =
-                !!w?.activeUserId &&
-                !!w?.holdExpiresAtMs &&
-                w.holdExpiresAtMs > now;
-
-              const holdForMe = hasHold && w.activeUserId === userId;
-
-              const blockedByHold = !isReserved && hasHold && !holdForMe;
-
-              const canReserveFinal = canReserveBase && !blockedByHold;
-
-              const showWaitlistButton =
-                !!userId &&
-                !canReserveFinal &&
-                ((isReserved && !isMine) ||
-                  blockedByHold ||
-                  queue.length > 0);
-
-              let waitPositionText = "";
-              if (userId) {
-                if (inWaitlist && queue.length > 0) {
-                  const position = myIdx + 1;
-
-                  if (holdForMe) {
-                    waitPositionText =
-                      `✅ התור שמור עבורך למשך ${HOLD_MINUTES} דקות.\n` +
-                      `המיקום שלך בתור: ${position}\n` +
-                      "לחצי על 'קביעת תור' כדי לאשר ולקבל את התור.";
-                  } else {
-                    waitPositionText = `המיקום שלך בתור: ${position}`;
-                  }
-                } else if (showWaitlistButton && queue.length > 0) {
-                  waitPositionText = `יש ${queue.length} בתור`;
-                  if (blockedByHold) {
-                    waitPositionText =
-                      `התור שמור כרגע ללקוחה אחרת למשך עד ${HOLD_MINUTES} דקות • ` +
-                      waitPositionText;
-                  }
-                }
-              }
-
-              return (
-                <View key={hour}>
-                  <HourSlot
-                    hour={hour}
-                    isReserved={isReserved}
-                    isMine={isMine}
-                    status={status}
-                    canReserve={canReserveFinal}
-                    canCancelRequest={canCancelRequest}
-                    onReserve={() => openServiceModal(hour)}
-                    onCancelRequest={
-                      canCancelRequest ? () => cancelMyRequest(app) : undefined
-                    }
-                    onCancel={
-                      canCancelApproved
-                        ? () => cancelApprovedReservation(app)
-                        : undefined
-                    }
-                    showWaitlistButton={showWaitlistButton}
-                    inWaitlist={inWaitlist}
-                    waitPositionText={waitPositionText}
-                    onWaitlistToggle={() => toggleWaitlist(selectedDate, hour)}
-                  />
-
-                  {isMine &&
-                  Array.isArray(app?.servicesSelected) &&
-                  app.servicesSelected.length > 0 ? (
-                    <Text
-                      style={{
-                        marginTop: -2,
-                        marginBottom: 8,
-                        textAlign: "center",
-                        color: "#555",
-                      }}
-                    >
-                      {`טיפולים: ${app.servicesSelected
-                        .map((s) => s.name)
-                        .join(", ")} • ${formatDuration(
-                        app.totalDurationMin || 0
-                      )}`}
-                      {Array.isArray(app?.slots) && app.slots.length > 1
-                        ? ` • נתפסו: ${app.slots.join(", ")}`
-                        : ""}
-                    </Text>
-                  ) : null}
-                </View>
-              );
-            })}
-          </ScrollView>
-        )}
-
-        {/* MODAL: select services */}
-        <Modal
-          visible={serviceModalOpen}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setServiceModalOpen(false)}
-        >
+          {/* Header */}
           <View
             style={{
-              flex: 1,
-              backgroundColor: "rgba(0,0,0,0.35)",
-              justifyContent: "center",
-              padding: 16,
+              paddingVertical: 12,
+              marginBottom: 10,
+              borderBottomWidth: 1,
+              borderBottomColor: colors.border,
             }}
+          >
+            <Text
+              style={{
+                fontSize: 22,
+                fontWeight: "900",
+                textAlign: "center",
+                color: colors.primary,
+              }}
+            >
+              תורים ליום {selectedDate}
+            </Text>
+
+            <Text
+              style={{
+                marginTop: 6,
+                textAlign: "center",
+                color: "#444",
+                fontWeight: "800",
+              }}
+            >
+              כל שריון נשלח לאישור בעלת העסק
+            </Text>
+          </View>
+
+          {loading ? (
+            <View style={{ marginTop: 30, alignItems: "center" }}>
+              <ActivityIndicator />
+              <Text style={{ marginTop: 10, color: "gray" }}>טוען שעות…</Text>
+            </View>
+          ) : hoursVisible.length === 0 ? (
+            <Text
+              style={{ textAlign: "center", color: "gray", marginTop: 30 }}
+            >
+              אין שעות זמינות ביום הזה. בחרי תאריך אחר.
+            </Text>
+          ) : (
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 90 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {hoursVisible.map((hour) => {
+                if (hiddenMineHours.has(hour)) {
+                  return null;
+                }
+
+                const app = appointmentByHour[hour];
+                const isReserved = !!app;
+                const isMine = isReserved && app?.userId === userId;
+                const status = app?.status || null;
+
+                const canReserveBase =
+                  !!userId &&
+                  (!myRes?.appointmentId || myRes?.status === "rejected") &&
+                  !isReserved &&
+                  !isAppointmentPast(selectedDate, hour);
+
+                const canCancelRequest =
+                  isMine &&
+                  status === "pending" &&
+                  app?.isHead &&
+                  Array.isArray(app?.slots) &&
+                  app.slots.length > 0;
+
+                const canCancelApproved =
+                  isMine &&
+                  status === "approved" &&
+                  app?.isHead &&
+                  Array.isArray(app?.slots) &&
+                  app.slots.length > 0;
+
+                const w = waitlistsByHour[hour] || null;
+                const queue = Array.isArray(w?.queue) ? w.queue : [];
+
+                const myIdx = userId
+                  ? queue.findIndex((x) => x?.userId === userId)
+                  : -1;
+                const inWaitlist = myIdx >= 0;
+
+                const now = Date.now();
+                const hasHold =
+                  !!w?.activeUserId &&
+                  !!w?.holdExpiresAtMs &&
+                  w.holdExpiresAtMs > now;
+
+                const holdForMe = hasHold && w.activeUserId === userId;
+
+                const blockedByHold = !isReserved && hasHold && !holdForMe;
+
+                const canReserveFinal = canReserveBase && !blockedByHold;
+
+                const showWaitlistButton =
+                  !!userId &&
+                  !canReserveFinal &&
+                  ((isReserved && !isMine) ||
+                    blockedByHold ||
+                    queue.length > 0);
+
+                let waitPositionText = "";
+                if (userId) {
+                  if (inWaitlist && queue.length > 0) {
+                    const position = myIdx + 1;
+
+                    if (holdForMe) {
+                      waitPositionText =
+                        `✅ התור שמור עבורך למשך ${HOLD_MINUTES} דקות.\n` +
+                        `המיקום שלך בתור: ${position}\n` +
+                        "לחצי על 'קביעת תור' כדי לאשר ולקבל את התור.";
+                    } else {
+                      waitPositionText = `המיקום שלך בתור: ${position}`;
+                    }
+                  } else if (showWaitlistButton && queue.length > 0) {
+                    waitPositionText = `יש ${queue.length} בתור`;
+                    if (blockedByHold) {
+                      waitPositionText =
+                        `התור שמור כרגע ללקוחה אחרת למשך עד ${HOLD_MINUTES} דקות • ` +
+                        waitPositionText;
+                    }
+                  }
+                }
+
+                return (
+                  <View key={hour}>
+                    <HourSlot
+                      hour={hour}
+                      isReserved={isReserved}
+                      isMine={isMine}
+                      status={status}
+                      canReserve={canReserveFinal}
+                      canCancelRequest={canCancelRequest}
+                      onReserve={() => openServiceModal(hour)}
+                      onCancelRequest={
+                        canCancelRequest ? () => cancelMyRequest(app) : undefined
+                      }
+                      onCancel={
+                        canCancelApproved
+                          ? () => cancelApprovedReservation(app)
+                          : undefined
+                      }
+                      showWaitlistButton={showWaitlistButton}
+                      inWaitlist={inWaitlist}
+                      waitPositionText={waitPositionText}
+                      onWaitlistToggle={() =>
+                        toggleWaitlist(selectedDate, hour)
+                      }
+                    />
+
+                    {isMine &&
+                    Array.isArray(app?.servicesSelected) &&
+                    app.servicesSelected.length > 0 ? (
+                      <Text
+                        style={{
+                          marginTop: -2,
+                          marginBottom: 8,
+                          textAlign: "center",
+                          color: "#555",
+                        }}
+                      >
+                        {`טיפולים: ${app.servicesSelected
+                          .map((s) => s.name)
+                          .join(", ")} • ${formatDuration(
+                          app.totalDurationMin || 0
+                        )}`}
+                        {Array.isArray(app?.slots) && app.slots.length > 1
+                          ? ` • נתפסו: ${app.slots.join(", ")}`
+                          : ""}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          {/* MODAL: select services */}
+          <Modal
+            visible={serviceModalOpen}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setServiceModalOpen(false)}
           >
             <View
               style={{
-                backgroundColor: "#fff",
-                borderRadius: 14,
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                justifyContent: "center",
                 padding: 16,
               }}
             >
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: "900",
-                  textAlign: "center",
-                }}
-              >
-                בחרי טיפולים לשעה {serviceHour}
-              </Text>
-
-              <Text
-                style={{
-                  marginTop: 6,
-                  textAlign: "center",
-                  color: "#666",
-                  fontWeight: "700",
-                }}
-              >
-                אפשר לבחור יותר מטיפול אחד
-              </Text>
-
-              <View style={{ marginTop: 14 }}>
-                {services.map((s, idx) => {
-                  const checked = !!selectedServiceIds[s.id];
-                  return (
-                    <Pressable
-                      key={`${s.id}_${s.name}_${idx}`}
-                      onPress={() =>
-                        setSelectedServiceIds((prev) => ({
-                          ...prev,
-                          [s.id]: !prev[s.id],
-                        }))
-                      }
-                      style={({ pressed }) => [
-                        {
-                          paddingVertical: 12,
-                          paddingHorizontal: 12,
-                          borderRadius: 12,
-                          borderWidth: 1,
-                          borderColor: checked ? colors.primary : "#ddd",
-                          marginBottom: 10,
-                          opacity: pressed ? 0.85 : 1,
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        },
-                        Platform.OS === "web" ? { cursor: "pointer" } : null,
-                      ]}
-                    >
-                      <Text style={{ fontWeight: "900" }}>
-                        {checked ? "✓ " : ""}
-                        {s.name}
-                      </Text>
-                      <Text
-                        style={{ fontWeight: "800", color: "#555" }}
-                      >
-                        {formatDuration(s.durationMin)}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text
-                style={{
-                  textAlign: "center",
-                  fontWeight: "900",
-                  marginTop: 4,
-                  color: "#333",
-                }}
-              >
-                סה״כ זמן: {formatDuration(selectedServices.total)}
-              </Text>
-
               <View
                 style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                  marginTop: 14,
-                  gap: 10,
+                  backgroundColor: "#fff",
+                  borderRadius: 14,
+                  padding: 16,
                 }}
               >
-                <Pressable
-                  onPress={() => setServiceModalOpen(false)}
-                  style={({ pressed }) => [
-                    {
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: "#bbb",
-                      alignItems: "center",
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                    Platform.OS === "web" ? { cursor: "pointer" } : null,
-                  ]}
-                >
-                  <Text style={{ fontWeight: "900" }}>סגור</Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={async () => {
-                    const chosen = selectedServices.chosen;
-                    const total = selectedServices.total;
-
-                    if (!serviceHour) return;
-                    if (!chosen.length) {
-                      showAlert(
-                        "חסר טיפול",
-                        "בחרי לפחות טיפול אחד כדי להמשיך."
-                      );
-                      return;
-                    }
-
-                    setServiceModalOpen(false);
-                    await reserveHourWithServices(serviceHour, chosen, total);
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: "900",
+                    textAlign: "center",
                   }}
-                  style={({ pressed }) => [
-                    {
-                      flex: 1,
-                      paddingVertical: 12,
-                      borderRadius: 12,
-                      backgroundColor: colors.primary,
-                      alignItems: "center",
-                      opacity: pressed ? 0.85 : 1,
-                    },
-                    Platform.OS === "web" ? { cursor: "pointer" } : null,
-                  ]}
                 >
-                  <Text
-                    style={{
-                      fontWeight: "900",
-                      color: "#fff",
-                    }}
+                  בחרי טיפולים לשעה {serviceHour}
+                </Text>
+
+                <Text
+                  style={{
+                    marginTop: 6,
+                    textAlign: "center",
+                    color: "#666",
+                    fontWeight: "700",
+                  }}
+                >
+                  אפשר לבחור יותר מטיפול אחד
+                </Text>
+
+                <View style={{ marginTop: 14 }}>
+                  {services.map((s, idx) => {
+                    const checked = !!selectedServiceIds[s.id];
+                    return (
+                      <Pressable
+                        key={`${s.id}_${s.name}_${idx}`}
+                        onPress={() =>
+                          setSelectedServiceIds((prev) => ({
+                            ...prev,
+                            [s.id]: !prev[s.id],
+                          }))
+                        }
+                        style={({ pressed }) => [
+                          {
+                            paddingVertical: 12,
+                            paddingHorizontal: 12,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: checked ? colors.primary : "#ddd",
+                            marginBottom: 10,
+                            opacity: pressed ? 0.85 : 1,
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          },
+                          Platform.OS === "web" ? { cursor: "pointer" } : null,
+                        ]}
+                      >
+                        <Text style={{ fontWeight: "900" }}>
+                          {checked ? "✓ " : ""}
+                          {s.name}
+                        </Text>
+                        <Text style={{ fontWeight: "800", color: "#555" }}>
+                          {formatDuration(s.durationMin)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <Text
+                  style={{
+                    textAlign: "center",
+                    fontWeight: "900",
+                    marginTop: 4,
+                    color: "#333",
+                  }}
+                >
+                  סה״כ זמן: {formatDuration(selectedServices.total)}
+                </Text>
+
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    marginTop: 14,
+                    gap: 10,
+                  }}
+                >
+                  <Pressable
+                    onPress={() => setServiceModalOpen(false)}
+                    style={({ pressed }) => [
+                      {
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: "#bbb",
+                        alignItems: "center",
+                        opacity: pressed ? 0.85 : 1,
+                      },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
                   >
-                    אישור שריון
-                  </Text>
-                </Pressable>
+                    <Text style={{ fontWeight: "900" }}>סגור</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={async () => {
+                      const chosen = selectedServices.chosen;
+                      const total = selectedServices.total;
+
+                      if (!serviceHour) return;
+                      if (!chosen.length) {
+                        showAlert(
+                          "חסר טיפול",
+                          "בחרי לפחות טיפול אחד כדי להמשיך."
+                        );
+                        return;
+                      }
+
+                      setServiceModalOpen(false);
+                      await reserveHourWithServices(serviceHour, chosen, total);
+                    }}
+                    style={({ pressed }) => [
+                      {
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        backgroundColor: colors.primary,
+                        alignItems: "center",
+                        opacity: pressed ? 0.85 : 1,
+                      },
+                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontWeight: "900",
+                        color: "#fff",
+                      }}
+                    >
+                      אישור שריון
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
-          </View>
-        </Modal>
+          </Modal>
 
-        {/* Back */}
-        <View
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 14,
-            paddingHorizontal: 16,
-          }}
-        >
-          <Pressable
-            onPress={() => navigation.goBack()}
+          {/* Back */}
+          <View
             style={{
-              backgroundColor: "#444",
-              paddingVertical: 12,
-              borderRadius: 12,
-              alignItems: "center",
-              ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 14,
+              paddingHorizontal: 16,
             }}
           >
-            <Text style={{ color: "white", fontWeight: "900" }}>חזרה</Text>
-          </Pressable>
+            <Pressable
+              onPress={() => navigation.goBack()}
+              style={{
+                backgroundColor: "#444",
+                paddingVertical: 12,
+                borderRadius: 12,
+                alignItems: "center",
+                ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
+              }}
+            >
+              <Text style={{ color: "white", fontWeight: "900" }}>חזרה</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
-    </AppBackground>
+    </ImageBackground>
   );
 }
+
+const styles = StyleSheet.create({
+  bg: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(255, 255, 255, 0.5)", // שכבה לבנה שקופה מעל הרקע
+  },
+});

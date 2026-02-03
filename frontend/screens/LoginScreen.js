@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+// frontend/screens/LoginScreen.js
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,16 +10,20 @@ import {
   Platform,
   ImageBackground,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
 } from "firebase/auth";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { auth } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
 import colors from "../styles/colors";
 
-// 👇 מייבאים את תמונת הרקע (רספונסיבית עם resizeMode="cover")
+// 🔥 Firestore
+import { doc, onSnapshot } from "firebase/firestore";
+
+// 👇 תמונת ברירת מחדל מקומית
 import bgImage from "../assets/backgroundOpenRegisApp.jpg";
 
 // ✅ מסיר תווי כיוון נסתרים (RTL/LTR marks) + רווחים
@@ -38,16 +43,62 @@ function showAlert(title, message) {
   }
 }
 
+// ✅ לא מוסיפים cache-bust ל-data:image/...base64,...
+function normalizeImgUri(uri, bustValue) {
+  const u = String(uri || "");
+  if (!u) return "";
+  if (u.startsWith("data:image/")) return u;
+  const sep = u.includes("?") ? "&" : "?";
+  return `${u}${sep}t=${bustValue}`;
+}
+
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // ✅ סטייטים לשכחת סיסמה
+  // ✅ שכחת סיסמה
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+
+  // ✅ כתובת רקע מה־Firestore (אם יש)
+  // undefined = עדיין לא נטען, null = אין ערך, string = URL
+  const [bgUrl, setBgUrl] = useState(undefined);
+  const [bgUpdatedAt, setBgUpdatedAt] = useState(Date.now());
+
+  // האזנה למסמך settings/business כדי לקבל backgroundOpenRegisAppUrl
+  useEffect(() => {
+    const ref = doc(db, "settings", "business");
+
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          setBgUrl(null);
+          setBgUpdatedAt(Date.now());
+          return;
+        }
+        const data = snap.data() || {};
+        const url =
+          typeof data.backgroundOpenRegisAppUrl === "string" &&
+          data.backgroundOpenRegisAppUrl.trim()
+            ? data.backgroundOpenRegisAppUrl.trim()
+            : null;
+
+        setBgUrl(url);
+        setBgUpdatedAt(Date.now());
+      },
+      (err) => {
+        console.log("❌ login background listen error:", err?.message || err);
+        setBgUrl(null);
+        setBgUpdatedAt(Date.now());
+      }
+    );
+
+    return () => unsub();
+  }, []);
 
   const handleLogin = async () => {
     const e = cleanEmail(email);
@@ -63,10 +114,7 @@ export default function LoginScreen({ navigation }) {
 
     try {
       await signInWithEmailAndPassword(auth, e, p);
-      // ❗ לא עושים navigation כאן
-      // AppNavigator מאזין ל-onAuthStateChanged
-      // ושולח owner -> OwnerDashboard
-      //       customer -> BusinessHomeScreen
+      // AppNavigator מאזין ל-onAuthStateChanged ומנווט לבד
     } catch (error) {
       let msg = "אירעה שגיאה, נסי שוב";
       if (error?.code === "auth/invalid-credential")
@@ -81,7 +129,7 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
-  // ✅ שחזור סיסמה – משתמש בשדה אימייל נפרד (resetEmail)
+  // ✅ שחזור סיסמה
   const handlePasswordReset = async () => {
     const e = cleanEmail(resetEmail);
 
@@ -114,11 +162,34 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  // 💡 עד ש־Firestore לא החזיר תשובה – לא מציגים את התמונה הישנה בכלל
+  if (bgUrl === undefined) {
+    return (
+      <View
+        style={[
+          styles.bg,
+          {
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "#fff",
+          },
+        ]}
+      >
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  // מקור הרקע בפועל – קודם מה־Firestore, אחרת קובץ מקומי
+  const backgroundSource = bgUrl
+    ? { uri: normalizeImgUri(bgUrl, bgUpdatedAt) }
+    : bgImage;
+
   return (
     <ImageBackground
-      source={bgImage}
+      source={backgroundSource}
       style={styles.bg}
-      resizeMode="cover" // 👈 רספונסיבי – תמונה מכסה את כל המסך
+      resizeMode="cover"
     >
       {/* שכבה לבנה שקופה שמכסה את כל המסך */}
       <View style={styles.overlay}>
@@ -199,7 +270,7 @@ export default function LoginScreen({ navigation }) {
         {/* ===== חלון איפוס סיסמה ===== */}
         {showResetModal && (
           <View style={styles.modalOverlay}>
-            <View style={styles.modalBox}>
+            <View className="modalBox" style={styles.modalBox}>
               <Text style={styles.modalTitle}>איפוס סיסמה</Text>
 
               <Text style={styles.label}>📧 אימייל</Text>
@@ -242,11 +313,11 @@ const styles = StyleSheet.create({
   bg: {
     flex: 1,
     width: "100%",
-    height: "100%", // 👈 לעזור גם בווב שהרקע יתפוס הכל
+    height: "100%",
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject, // מכסה את כל המסך
-    backgroundColor: "rgba(255, 255, 255, 0.5)", // לבן שקוף מעל התמונה
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255, 255, 255, 0.5)",
   },
   container: {
     flexGrow: 1,
@@ -268,7 +339,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: "right",
   },
-
   input: {
     width: "100%",
     borderWidth: 2,
@@ -283,7 +353,6 @@ const styles = StyleSheet.create({
     writingDirection: "rtl",
     color: "#000",
   },
-
   emailInput: {
     width: "100%",
     borderWidth: 2,
@@ -298,7 +367,6 @@ const styles = StyleSheet.create({
     writingDirection: "ltr",
     color: "#000",
   },
-
   passwordWrapper: {
     position: "relative",
     width: "100%",
@@ -317,7 +385,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
   },
-
   forgotPassword: {
     marginTop: 8,
     textAlign: "left",
@@ -325,7 +392,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textDecorationLine: "underline",
   },
-
   button: {
     backgroundColor: colors.primary,
     paddingVertical: 14,
@@ -345,8 +411,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
     textDecorationLine: "underline",
   },
-
-  // ===== עיצוב חלון איפוס סיסמה =====
   modalOverlay: {
     position: "absolute",
     top: 0,
