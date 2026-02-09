@@ -1634,7 +1634,7 @@ async function ownerDeletePastAppointment(app) {
           paddingHorizontal: 14,
           borderRadius: 12,
           borderWidth: 1,
-          borderColor: danger ? "#D6455D" : colors.border,
+          borderColor: danger ? "#d33" : colors.border,
           backgroundColor: "#fff",
           marginTop: 10,
           alignItems: "center",
@@ -1643,7 +1643,7 @@ async function ownerDeletePastAppointment(app) {
         Platform.OS === "web" ? { cursor: "pointer" } : null,
       ]}
     >
-      <Text style={{ fontWeight: "900", color: danger ? "#D6455D" : colors.textDark }}>{text}</Text>
+      <Text style={{ fontWeight: "900", color: danger ? "#d33" : colors.textDark }}>{text}</Text>
     </Pressable>
   );
 
@@ -1668,7 +1668,7 @@ const markedDates = useMemo(() => {
     if (hasApproved) {
       dots.push({
         key: "approved",
-        color: "#4CAF50", // 💚 ירוק – תור מאושר
+        color: "#2e7d32", // 💚 ירוק – תור מאושר
       });
     }
 
@@ -1692,7 +1692,7 @@ const markedDates = useMemo(() => {
 
   const dotsToday = [];
   if (hasApprovedToday) {
-    dotsToday.push({ key: "approved", color: "#4CAF50" }); // 💚 ירוק
+    dotsToday.push({ key: "approved", color: "#2e7d32" }); // 💚 ירוק
   }
   if (hasPendingToday) {
     dotsToday.push({ key: "pending", color: "#ff9800" });
@@ -1801,7 +1801,7 @@ const acceptedLatest =
   accepted && termsVersion > 0 && acceptedVersion === termsVersion;
 
 const termsLabel = acceptedLatest ? "✔ תקנון מאושר" : "✖ טרם אושר";
-const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
+const termsColor = acceptedLatest ? "#2e7d32" : "#d32f2f";
 
 
   return (
@@ -1932,7 +1932,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                 שעות לתאריך: {hoursForSelectedDate.length} {availabilityExists ? "(מיוחד)" : "(ברירת מחדל)"}
               </Text>
 
-              <Text style={{ marginTop: 6, fontSize: responsiveFont(13), textAlign: "center", color: "#F5A623", fontWeight: "900" }}>
+              <Text style={{ marginTop: 6, fontSize: responsiveFont(13), textAlign: "center", color: "#ff8f00", fontWeight: "900" }}>
                 בקשות ממתינות: {requests.length}
               </Text>
             </View>
@@ -2164,11 +2164,11 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                       ]);
                     }}
                     style={({ pressed }) => [
-                      { backgroundColor: "#fff", borderWidth: 1, borderColor: "#D6455D", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
+                      { backgroundColor: "#fff", borderWidth: 1, borderColor: "#d33", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
                       Platform.OS === "web" ? { cursor: "pointer" } : null,
                     ]}
                   >
-                    <Text style={{ color: "#D6455D", fontWeight: "900" }}>איפוס תאריך לברירת מחדל</Text>
+                    <Text style={{ color: "#d33", fontWeight: "900" }}>איפוס תאריך לברירת מחדל</Text>
                   </Pressable>
 
                   <Pressable
@@ -2317,13 +2317,13 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                               paddingHorizontal: 10,
                               borderRadius: 999,
                               borderWidth: 1,
-                              borderColor: "#D6455D",
+                              borderColor: "#d33",
                               opacity: pressed ? 0.85 : 1,
                             },
                             Platform.OS === "web" ? { cursor: "pointer" } : null,
                           ]}
                         >
-                          <Text style={{ color: "#D6455D", fontWeight: "900" }}>
+                          <Text style={{ color: "#d33", fontWeight: "900" }}>
                             מחיקת טיפול
                           </Text>
                         </Pressable>
@@ -2704,7 +2704,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
             </View>
           </InputAccessoryView>
         ) : null}
-
         {/* Calendar */}
         <Calendar
           minDate={today}
@@ -2717,19 +2716,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
             borderColor: colors.border,
             marginBottom: 12,
           }}
-          hideArrows={false}
-          renderArrow={(direction) => (
-            <Text
-              style={{
-                fontSize: responsiveFont(20),
-                color: colors.primary,
-                fontWeight: "900",
-                paddingHorizontal: 4,
-              }}
-            >
-              {direction === "left" ? "‹" : "›"}
-            </Text>
-          )}
           theme={{
             todayTextColor: colors.secondary,
             selectedDayBackgroundColor: colors.primary,
@@ -2738,7 +2724,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
             textDisabledColor: "#d9e1e8",
           }}
         />
-
 
         {/* מקרא נקודות */}
         <View
@@ -2757,7 +2742,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                 width: 10,
                 height: 10,
                 borderRadius: 5,
-                backgroundColor: "#4CAF50", // ירוק
+                backgroundColor: "#2e7d32", // ירוק
                 marginRight: 12, // 👈 רווח אמיתי בין העיגול לטקסט
               }}
             />
@@ -2899,7 +2884,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                       onPress={() => approveRequest(r)}
                       style={{
                         flex: 1,
-                        backgroundColor: "#4CAF50",
+                        backgroundColor: "#2e7d32",
                         paddingVertical: 10,
                         borderRadius: 10,
                         alignItems: "center",
@@ -3072,7 +3057,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                         style={{
                           marginTop: 6,
                           fontSize: responsiveFont(14),
-                          color: "#4CAF50",
+                          color: "#2e7d32",
                           fontWeight: "900",
                           width: "100%",
                           textAlign: "right",

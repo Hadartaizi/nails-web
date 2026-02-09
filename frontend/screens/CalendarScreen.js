@@ -945,66 +945,52 @@ export default function CalendarScreen({ navigation }) {
               padding: rf(10),
             }}
           >
-          <Calendar
-            minDate={today}
-            markedDates={markedDates}
-            onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
-            onDayPress={(day) => {
-              if (!hasAcceptedLatestTerms) {
-                const msg =
-                  "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
+            <Calendar
+              minDate={today}
+              markedDates={markedDates}
+              onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
+              onDayPress={(day) => {
+                if (!hasAcceptedLatestTerms) {
+                  const msg =
+                    "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
 
-                if (Platform.OS === "web") {
-                  window.alert(msg);
-                  navigation.navigate("Terms");
-                } else {
-                  Alert.alert("נדרש אישור תקנון", msg, [
-                    {
-                      text: "מעבר לתקנון",
-                      onPress: () => navigation.navigate("Terms"),
-                    },
-                  ]);
+                  if (Platform.OS === "web") {
+                    window.alert(msg);
+                    navigation.navigate("Terms");
+                  } else {
+                    Alert.alert("נדרש אישור תקנון", msg, [
+                      {
+                        text: "מעבר לתקנון",
+                        onPress: () => navigation.navigate("Terms"),
+                      },
+                    ]);
+                  }
+                  return;
                 }
-                return;
-              }
 
-              navigation.navigate("Day", {
-                selectedDate: day.dateString,
-                date: day.dateString,
-                requireApproval: true,
-              });
-            }}
-            style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
-            hideArrows={false}
-            renderArrow={(direction) => (
-              <Text
-                style={{
-                  fontSize: rf(20),
-                  color: colors.primary,
-                  fontWeight: "900",
-                  paddingHorizontal: 4,
-                }}
-              >
-                {direction === "left" ? "‹" : "›"}
-              </Text>
-            )}
-            theme={{
-              calendarBackground: "transparent",
-              todayTextColor: colors.secondary,
-              selectedDayBackgroundColor: colors.primary,
-              selectedDayTextColor: "#fff",
-              arrowColor: colors.primary,
-              monthTextColor: colors.primary,
-              textMonthFontWeight: "900",
-              textDayFontWeight: "600",
-              textDayHeaderFontWeight: "700",
-              textDisabledColor: "#d9e1e8",
-              textMonthFontSize: rf(16),
-              textDayFontSize: rf(14),
-              textDayHeaderFontSize: rf(12),
-            }}
-          />
-
+                navigation.navigate("Day", {
+                  selectedDate: day.dateString,
+                  date: day.dateString,
+                  requireApproval: true,
+                });
+              }}
+              style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
+              theme={{
+                calendarBackground: "transparent",
+                todayTextColor: colors.secondary,
+                selectedDayBackgroundColor: colors.primary,
+                selectedDayTextColor: "#fff",
+                arrowColor: colors.primary,
+                monthTextColor: colors.primary,
+                textMonthFontWeight: "900",
+                textDayFontWeight: "600",
+                textDayHeaderFontWeight: "700",
+                textDisabledColor: "#d9e1e8",
+                textMonthFontSize: rf(16),
+                textDayFontSize: rf(14),
+                textDayHeaderFontSize: rf(12),
+              }}
+            />
           </View>
 
           {/* My Reservation */}
