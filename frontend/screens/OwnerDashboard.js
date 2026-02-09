@@ -648,60 +648,61 @@ useEffect(() => {
     return defaultHours;
   }, [availabilityExists, availabilityHours, defaultHours]);
 
-  // ✅ בקשות ממתינות לתאריך הנבחר
-  useEffect(() => {
-    const qReq = query(
-      collection(db, "appointmentRequests"),
-      where("date", "==", selectedDate),
-      where("status", "==", "pending")
-    );
+// ✅ בקשות ממתינות לתאריך הנבחר (לכותרת ולרשימה למטה)
+useEffect(() => {
+  // במסך "לקוחות פעילים" אין צורך להאזין לבקשות
+  if (showUsers) return;
 
-    const unsub = onSnapshot(
-      qReq,
-      (snap) => {
-        const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        arr.sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
-        setRequests(arr);
-      },
-      (err) => {
-        console.log("❌ appointmentRequests listen error:", err?.code, err?.message);
-        showAlert("שגיאה בטעינת בקשות ממתינות", err?.message || "לא הצליח לטעון בקשות. בדקי אינדקס/הרשאות.");
-        setRequests([]);
-      }
-    );
+  const qReq = query(
+    collection(db, "appointmentRequests"),
+    where("date", "==", selectedDate),
+    where("status", "==", "pending")
+  );
 
-    return () => unsub();
-  }, [selectedDate]);
+  const unsub = onSnapshot(
+    qReq,
+    (snap) => {
+      const arr = snap.docs
+        .map((d) => {
+          const data = d.data() || {};
+          const hour = normalizeHour(data.hour);
 
-  // ✅ תורים מאושרים לתאריך הנבחר
-  useEffect(() => {
-    if (showUsers) return;
+          return {
+            id: d.id,
+            ...data,
+            hour,
+          };
+        })
+        // רק בקשות שיש להן שעה תקינה
+        .filter((r) => !!r.hour)
+        // מיון לפי שעה
+        .sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
 
-    const qApps = query(
-      collection(db, "appointments"),
-      where("date", "==", selectedDate),
-      where("status", "==", "approved")
-    );
+      console.log(
+        "📥 pending requests for",
+        selectedDate,
+        "=>",
+        arr.length
+      );
 
-    const unsub = onSnapshot(
-      qApps,
-      (snap) => {
-        const raw = snap.docs.map((d) => ({ docId: d.id, ...d.data() }));
-        const arr = raw.filter((a) => {
-          if (a?.groupId) return !!a?.isHead;
-          return true;
-        });
-        arr.sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
-        setAppointments(arr);
-      },
-      (err) => {
-        console.log("❌ approved appointments listen error:", err?.code, err?.message);
-        showAlert("שגיאה", "לא הצליח לטעון תורים מאושרים");
-      }
-    );
+      setRequests(arr);
+    },
+    (err) => {
+      console.log(
+        "❌ appointmentRequests listen error:",
+        err?.code,
+        err?.message
+      );
+      showAlert(
+        "שגיאה בטעינת בקשות ממתינות",
+        err?.message || "לא הצליח לטעון בקשות. בדקי אינדקס/הרשאות."
+      );
+      setRequests([]);
+    }
+  );
 
-    return () => unsub();
-  }, [selectedDate, showUsers]);
+  return () => unsub();
+}, [selectedDate, showUsers]);
 
 useEffect(() => {
   if (showUsers) return;

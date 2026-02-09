@@ -145,7 +145,13 @@ export default function CalendarScreen({ navigation }) {
     };
   }, [width]);
 
-  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const today = useMemo(() => {
+    const now = new Date(); // תאריך מקומי
+    const y = now.getFullYear();
+    const m = pad2(now.getMonth() + 1);
+    const d = pad2(now.getDate());
+    return `${y}-${m}-${d}`;
+  }, []);
 
   // ✅ userId יציב
   const [userId, setUserId] = useState(auth.currentUser?.uid || null);
@@ -160,6 +166,9 @@ export default function CalendarScreen({ navigation }) {
 
   // ✅ החודש שמוצג ביומן
   const [calendarMonthDate, setCalendarMonthDate] = useState(today);
+
+  // ✅ התאריך שנבחר ביומן (לעיגול)
+  const [selectedDate, setSelectedDate] = useState(today);
 
   // ✅ ימים עם שעות מיוחדות (override)
   const [overrideDaysMarked, setOverrideDaysMarked] = useState({});
@@ -364,7 +373,7 @@ export default function CalendarScreen({ navigation }) {
           } else if (serviceLabel) {
             baseText = `התור שלך ל${serviceLabel} בוטל ע"י בעלת העסק.`;
           } else {
-            baseText = "התור שלך בוטל ע\"י בעלת העסק.";
+            baseText = 'התור שלך בוטל ע"י בעלת העסק.';
           }
 
           const fullText = `${baseText}\n\nניתן לקבוע תור חדש מהיומן.`;
@@ -567,14 +576,16 @@ export default function CalendarScreen({ navigation }) {
     ]);
   }
 
-  // ✅ תור פעיל בלבד (pending / approved) – זה מה שמוצג ב"התור שלי"
-  const activeRes = useMemo(
-    () =>
-      myRes && (myRes.status === "pending" || myRes.status === "approved")
-        ? myRes
-        : null,
-    [myRes]
-  );
+  // ✅ תור פעיל בלבד – *שלא עבר* בזמן
+  const activeRes = useMemo(() => {
+    if (!myRes) return null;
+    // אם התור כבר עבר – לא נחשב כ"תור פעיל"
+    if (isReservationPassed(myRes)) return null;
+
+    return myRes.status === "pending" || myRes.status === "approved"
+      ? myRes
+      : null;
+  }, [myRes]);
 
   // ✅ ביטול תור על ידי הלקוחה
   async function cancelMyReservationFromCalendar() {
@@ -750,16 +761,26 @@ export default function CalendarScreen({ navigation }) {
   const markedDates = useMemo(() => {
     const out = { ...overrideDaysMarked };
 
+    // ✅ היום שהמשתמש בחר – עיגול רגיל (primary)
+    if (selectedDate) {
+      out[selectedDate] = {
+        ...(out[selectedDate] || {}),
+        selected: true,
+        selectedColor: colors.primary,
+      };
+    }
+
+    // ✅ תור פעיל – רק נקודה בצבע משני, בלי עיגול
     if (activeRes?.date) {
       out[activeRes.date] = {
         ...(out[activeRes.date] || {}),
-        selected: true,
-        selectedColor: colors.secondary,
+        marked: true,
+        dotColor: colors.secondary, // נקודה ורודה במקום עיגול
       };
     }
 
     return out;
-  }, [overrideDaysMarked, activeRes]);
+  }, [overrideDaysMarked, activeRes, selectedDate]);
 
   const MenuItem = ({ text, danger, onPress }) => (
     <Pressable
@@ -923,7 +944,7 @@ export default function CalendarScreen({ navigation }) {
               בחרי תאריך ביומן כדי להמשיך
             </Text>
 
-            <Text
+            {/* <Text
               style={{
                 marginTop: rf(6),
                 color: "#666",
@@ -932,7 +953,7 @@ export default function CalendarScreen({ navigation }) {
               }}
             >
               נקודה מתחת ליום = שעות מיוחדות שהוגדרו ידנית
-            </Text>
+            </Text> */}
           </View>
 
           {/* Calendar */}
@@ -945,66 +966,68 @@ export default function CalendarScreen({ navigation }) {
               padding: rf(10),
             }}
           >
-          <Calendar
-            minDate={today}
-            markedDates={markedDates}
-            onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
-            onDayPress={(day) => {
-              if (!hasAcceptedLatestTerms) {
-                const msg =
-                  "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
+            <Calendar
+              minDate={today}
+              markedDates={markedDates}
+              onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
+              onDayPress={(day) => {
+                // ✅ קודם כל לסמן את היום שנלחץ – כדי שיקבל עיגול
+                setSelectedDate(day.dateString);
 
-                if (Platform.OS === "web") {
-                  window.alert(msg);
-                  navigation.navigate("Terms");
-                } else {
-                  Alert.alert("נדרש אישור תקנון", msg, [
-                    {
-                      text: "מעבר לתקנון",
-                      onPress: () => navigation.navigate("Terms"),
-                    },
-                  ]);
+                if (!hasAcceptedLatestTerms) {
+                  const msg =
+                    "לפני קביעת תור במערכת חובה לקרוא ולאשר את התקנון במסך התקנון.";
+
+                  if (Platform.OS === "web") {
+                    window.alert(msg);
+                    navigation.navigate("Terms");
+                  } else {
+                    Alert.alert("נדרש אישור תקנון", msg, [
+                      {
+                        text: "מעבר לתקנון",
+                        onPress: () => navigation.navigate("Terms"),
+                      },
+                    ]);
+                  }
+                  return;
                 }
-                return;
-              }
 
-              navigation.navigate("Day", {
-                selectedDate: day.dateString,
-                date: day.dateString,
-                requireApproval: true,
-              });
-            }}
-            style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
-            hideArrows={false}
-            renderArrow={(direction) => (
-              <Text
-                style={{
-                  fontSize: rf(20),
-                  color: colors.primary,
-                  fontWeight: "900",
-                  paddingHorizontal: 4,
-                }}
-              >
-                {direction === "left" ? "‹" : "›"}
-              </Text>
-            )}
-            theme={{
-              calendarBackground: "transparent",
-              todayTextColor: colors.secondary,
-              selectedDayBackgroundColor: colors.primary,
-              selectedDayTextColor: "#fff",
-              arrowColor: colors.primary,
-              monthTextColor: colors.primary,
-              textMonthFontWeight: "900",
-              textDayFontWeight: "600",
-              textDayHeaderFontWeight: "700",
-              textDisabledColor: "#d9e1e8",
-              textMonthFontSize: rf(16),
-              textDayFontSize: rf(14),
-              textDayHeaderFontSize: rf(12),
-            }}
-          />
-
+                navigation.navigate("Day", {
+                  selectedDate: day.dateString,
+                  date: day.dateString,
+                  requireApproval: true,
+                });
+              }}
+              style={{ borderRadius: rf(12), backgroundColor: "transparent" }}
+              hideArrows={false}
+              renderArrow={(direction) => (
+                <Text
+                  style={{
+                    fontSize: rf(20),
+                    color: colors.primary,
+                    fontWeight: "900",
+                    paddingHorizontal: 4,
+                  }}
+                >
+                  {direction === "left" ? "‹" : "›"}
+                </Text>
+              )}
+              theme={{
+                calendarBackground: "transparent",
+                todayTextColor: colors.secondary,
+                selectedDayBackgroundColor: colors.primary,
+                selectedDayTextColor: "#fff",
+                arrowColor: colors.primary,
+                monthTextColor: colors.primary,
+                textMonthFontWeight: "900",
+                textDayFontWeight: "600",
+                textDayHeaderFontWeight: "700",
+                textDisabledColor: "#d9e1e8",
+                textMonthFontSize: rf(16),
+                textDayFontSize: rf(14),
+                textDayHeaderFontSize: rf(12),
+              }}
+            />
           </View>
 
           {/* My Reservation */}

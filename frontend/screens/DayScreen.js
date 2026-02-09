@@ -131,6 +131,12 @@ function isAppointmentPast(dateStr, hourStr) {
   }
 }
 
+// ✅ תור עבר? (משתמשים כמו ב-CalendarScreen)
+function isReservationPassed(res) {
+  if (!res) return false;
+  return isAppointmentPast(res.date, res.hour);
+}
+
 function safeServices(list) {
   const arr = Array.isArray(list) ? list : [];
   const cleaned = arr
@@ -662,6 +668,14 @@ export default function DayScreen({ route, navigation }) {
     return () => unsub();
   }, [userId]);
 
+  // ✅ האם יש תור פעיל *אמיתי* (לאRejected ולא עבר)
+  const hasActiveReservation = useMemo(() => {
+    if (!myRes || !myRes.appointmentId) return false;
+    if (myRes.status === "rejected") return false;
+    if (isReservationPassed(myRes)) return false;
+    return true;
+  }, [myRes]);
+
   // --- listen settings/business (default hours + services) ---
   useEffect(() => {
     const ref = doc(db, "settings", "business");
@@ -816,7 +830,8 @@ export default function DayScreen({ route, navigation }) {
       return;
     }
 
-    if (myRes?.appointmentId && myRes?.status !== "rejected") {
+    // ❗ במקום לבדוק רק myRes, משתמשים ב-hasActiveReservation
+    if (hasActiveReservation) {
       showAlert(
         "שגיאה",
         "כבר יש לך תור פעיל. בטלי קודם כדי לשריין חדש."
@@ -943,8 +958,14 @@ export default function DayScreen({ route, navigation }) {
         const myResSnap = await tx.get(userResRef);
         if (myResSnap.exists()) {
           const prev = myResSnap.data();
+          // ❗ פה נשאיר את הבדיקה כמו קודם כי כבר סיננו ב-hasActiveReservation ב-UI,
+          // אבל אם בכל זאת יש תור פעיל בשרת – נגן גם כאן.
           if (prev?.status !== "rejected" && prev?.appointmentId) {
-            throw new Error("כבר יש לך תור פעיל. בטלי קודם כדי לשריין חדש.");
+            if (!isReservationPassed(prev)) {
+              throw new Error(
+                "כבר יש לך תור פעיל. בטלי קודם כדי לשריין חדש."
+              );
+            }
           }
         }
 
@@ -1326,7 +1347,7 @@ export default function DayScreen({ route, navigation }) {
 
                 const canReserveBase =
                   !!userId &&
-                  (!myRes?.appointmentId || myRes?.status === "rejected") &&
+                  !hasActiveReservation && // ❗ כאן השינוי – אין תור פעיל אמיתי
                   !isReserved &&
                   !isAppointmentPast(selectedDate, hour);
 
@@ -1623,7 +1644,7 @@ export default function DayScreen({ route, navigation }) {
             <Pressable
               onPress={() => navigation.goBack()}
               style={{
-                backgroundColor: "#444",
+                backgroundColor: colors.primary,
                 paddingVertical: 12,
                 borderRadius: 12,
                 alignItems: "center",
