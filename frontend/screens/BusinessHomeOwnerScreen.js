@@ -39,7 +39,7 @@ import colors from "../styles/colors";
 
 
 // ================== ASSETS ==================
-const LOGO_FALLBACK = require("../assets/businessLogo.jpg"); // fallback מקומי אם אין לוגו בדאטה
+// const LOGO_FALLBACK = require("../assets/businessLogo.jpg"); // fallback מקומי אם אין לוגו בדאטה
 const whatsappLogo = require("../assets/whatsappLogo.png");
 const phoneLogo = require("../assets/phoneLogo.jpg");
 const instagramLogo = require("../assets/instegramLogo.jpg");

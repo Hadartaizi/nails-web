@@ -3,19 +3,19 @@
     "name": "Nails Rotem Studio",
     "slug": "nails-rotem-studio",
 
-    "icon": "./assets/appLogo.png",
+    "icon": "./assets/appLogoApp.png",
 
     "ios": {
-      "icon": "./assets/appLogo.png"
+      "icon": "./assets/appLogoApp.png"
     },
     "android": {
-      "icon": "./assets/appLogo.png"
+      "icon": "./assets/appLogoApp.png"
     },
 
     "web": {
       "name": "Nails Rotem Studio",
-      "favicon": "./assets/appLogo.png",
-      "icon": "./assets/appLogo.png"
+      "favicon": "./assets/appLogoApp.png",
+      "icon": "./assets/appLogoApp.png"
     },
 
     "platforms": ["ios", "android", "web"],

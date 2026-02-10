@@ -140,7 +140,7 @@ export default function AddToHomeScreenBanner() {
         {/* לוגו + כותרת */}
         <View style={{ alignItems: "center", marginBottom: 10 }}>
           <Image
-            source={require("../assets/appLogo.png")}
+            source={require("../assets/appLogoApp.png")}
             style={{
               width: logoSize,
               height: logoSize,

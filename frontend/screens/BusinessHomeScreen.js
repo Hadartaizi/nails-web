@@ -38,7 +38,7 @@ import { setupWebPushForCurrentUser } from "../utils/setupWebPush";
 import { onAuthStateChanged } from "firebase/auth";
 
 // ================== ASSETS ==================
-const LOGO = require("../assets/businessLogo.jpg");
+
 const whatsappLogo = require("../assets/whatsappLogo.png");
 const phoneLogo = require("../assets/phoneLogo.jpg");
 const instagramLogo = require("../assets/instegramLogo.jpg");
