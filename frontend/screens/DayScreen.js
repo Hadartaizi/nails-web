@@ -22,6 +22,7 @@ import {
   runTransaction,
   serverTimestamp,
   getDoc,
+  getDocs, // ✅ נוסיף getDocs
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
@@ -455,7 +456,7 @@ export default function DayScreen({ route, navigation }) {
   const [overrideHours, setOverrideHours] = useState(null);
 
   const [appointments, setAppointments] = useState([]);
-  const [myRes, setMyRes] = useState(null);
+  const [myRes, setMyRes] = useState(null); // נשאיר, אבל לא נשתמש להגבלה
 
   const [services, setServices] = useState([]);
 
@@ -638,7 +639,7 @@ export default function DayScreen({ route, navigation }) {
     });
   }, [waitlistsByHour]);
 
-  // --- listen my reservation ---
+  // --- listen my reservation (נשאר רק לצורך תאימות, לא מגביל יותר ל־1) ---
   useEffect(() => {
     if (!userId) {
       setMyRes(null);
@@ -668,13 +669,8 @@ export default function DayScreen({ route, navigation }) {
     return () => unsub();
   }, [userId]);
 
-  // ✅ האם יש תור פעיל *אמיתי* (לאRejected ולא עבר)
-  const hasActiveReservation = useMemo(() => {
-    if (!myRes || !myRes.appointmentId) return false;
-    if (myRes.status === "rejected") return false;
-    if (isReservationPassed(myRes)) return false;
-    return true;
-  }, [myRes]);
+  // ✅ לא משתמשים יותר ב-hasActiveReservation להגבלה – ההגבלה עוברת ל־3 תורים בבדיקה מתוך appointments.
+  // (נשאיר את myRes בשביל שימושים אחרים אם יהיו בהמשך)
 
   // --- listen settings/business (default hours + services) ---
   useEffect(() => {
@@ -830,14 +826,7 @@ export default function DayScreen({ route, navigation }) {
       return;
     }
 
-    // ❗ במקום לבדוק רק myRes, משתמשים ב-hasActiveReservation
-    if (hasActiveReservation) {
-      showAlert(
-        "שגיאה",
-        "כבר יש לך תור פעיל. בטלי קודם כדי לשריין חדש."
-      );
-      return;
-    }
+    // ❌ כבר לא בודקים כאן "יש לך תור פעיל" – ההגבלה נעשית לפי 3 תורים ב-reserveHourWithServices
 
     if (appointmentByHour[hour]) {
       showAlert("שגיאה", "השעה הזו כבר תפוסה.");
@@ -873,11 +862,61 @@ export default function DayScreen({ route, navigation }) {
     setServiceModalOpen(true);
   }
 
+  // ✅ פונקציה עוזרת – כמה תורים עתידיים כבר יש ללקוחה
+  async function countActiveFutureReservations(userId) {
+    if (!userId) return 0;
+
+    try {
+      const todayStr = new Date().toISOString().split("T")[0];
+
+      const qApps = query(
+        collection(db, "appointments"),
+        where("userId", "==", userId),
+        where("date", ">=", todayStr)
+      );
+
+      const snap = await getDocs(qApps);
+      let count = 0;
+
+      snap.forEach((docSnap) => {
+        const a = docSnap.data() || {};
+        const status = a.status || "pending";
+
+        // נספור רק תורים פעילים: pending / approved
+        if (status !== "pending" && status !== "approved") return;
+
+        if (!a.date || !a.hour) return;
+        if (isAppointmentPast(a.date, a.hour)) return;
+
+        // נספור רק את השעה הראשונה של התור (isHead)
+        if (!a.isHead) return;
+
+        count++;
+      });
+
+      return count;
+    } catch (e) {
+      console.log("⚠️ countActiveFutureReservations error:", e);
+      // אם הייתה בעיה, לא נחסום – נחזיר 0 כדי לא לתקוע את הלקוחה
+      return 0;
+    }
+  }
+
   async function reserveHourWithServices(startHour, chosen, totalDurationMin) {
     if (!userId) return;
 
     if (!totalDurationMin || totalDurationMin <= 0) {
       showAlert("חסר טיפול", "בחרי לפחות טיפול אחד כדי להמשיך.");
+      return;
+    }
+
+    // ✅ הגבלה ל־3 שריוני תור (תורים עתידיים במצב מאושר או ממתין לאישור)
+    const currentCount = await countActiveFutureReservations(userId);
+    if (currentCount >= 3) {
+      showAlert(
+        "לא ניתן לקבוע תור",
+        "כבר יש לך 3 שריוני תור עתידיים (מאושרים או בממתינים לאישור).\nכדי לקבוע תור נוסף, עלייך לבטל תור קיים או תור שממתין לאישור."
+      );
       return;
     }
 
@@ -955,19 +994,7 @@ export default function DayScreen({ route, navigation }) {
 
     try {
       await runTransaction(db, async (tx) => {
-        const myResSnap = await tx.get(userResRef);
-        if (myResSnap.exists()) {
-          const prev = myResSnap.data();
-          // ❗ פה נשאיר את הבדיקה כמו קודם כי כבר סיננו ב-hasActiveReservation ב-UI,
-          // אבל אם בכל זאת יש תור פעיל בשרת – נגן גם כאן.
-          if (prev?.status !== "rejected" && prev?.appointmentId) {
-            if (!isReservationPassed(prev)) {
-              throw new Error(
-                "כבר יש לך תור פעיל. בטלי קודם כדי לשריין חדש."
-              );
-            }
-          }
-        }
+        // ❌ הורדנו את הבדיקה הישנה על userReservations שמנעה יותר מתור אחד
 
         const slotRefs = slots.map((h) =>
           doc(db, "appointments", makeAppointmentDocId(selectedDate, h))
@@ -1345,9 +1372,9 @@ export default function DayScreen({ route, navigation }) {
                 const isMine = isReserved && app?.userId === userId;
                 const status = app?.status || null;
 
+                // ❗ אין יותר hasActiveReservation – הלקוחה יכולה לשריין עד 3, וההגבלה נעשית בתוך reserveHourWithServices
                 const canReserveBase =
                   !!userId &&
-                  !hasActiveReservation && // ❗ כאן השינוי – אין תור פעיל אמיתי
                   !isReserved &&
                   !isAppointmentPast(selectedDate, hour);
 

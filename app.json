@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Nails Rotem Studio",
+    "name": "Rotem Nails Studio",
     "slug": "nails-rotem-studio",
     "owner": "hadartaizi",
 
@@ -10,7 +10,7 @@
 
     "web": {
       "favicon": "./assets/appLogo.png",
-      "name": "Nails Rotem Studio",
+      "name": "Rotem Nails Studio",
       "shortName": "Nails Rotem"
     },
 

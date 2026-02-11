@@ -15,7 +15,6 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-
 import { Calendar } from "react-native-calendars";
 import {
   collection,
@@ -28,25 +27,25 @@ import {
   serverTimestamp,
   orderBy,
   deleteDoc,
-  setDoc, 
+  setDoc,
 } from "firebase/firestore";
 
 import { signOut } from "firebase/auth";
 import globalStyles from "../styles/global";
 import colors from "../styles/colors";
-import { auth, db } from "../firebaseConfig"; // 👈 להוסיף storage פה
+import { auth, db } from "../firebaseConfig";
 import {
-  sendAppointmentEmail,sendAppointmentRejectedEmail, sendAppointmentCancelledEmail,
+  sendAppointmentEmail,
+  sendAppointmentRejectedEmail,
+  sendAppointmentCancelledEmail,
+  sendWaitlistHoldEmail,
 } from "../emailReminder";
 
-// 👇 חדש:
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 
-
 function showAlert(title, message, buttons) {
   if (Platform.OS === "web") {
-    // אם יש כפתורים (למשל ב-confirmAction)
     if (Array.isArray(buttons) && buttons.length) {
       const cancelBtn = buttons.find((b) => b.style === "cancel") || null;
       const okBtn =
@@ -60,17 +59,13 @@ function showAlert(title, message, buttons) {
         cancelBtn?.onPress && cancelBtn.onPress();
       }
     } else {
-      // רק הודעה רגילה
       window.alert(`${title}\n\n${message}`);
     }
     return;
   }
 
-  // מובייל – Alert אמיתי
   Alert.alert(title, message, buttons);
 }
-
-
 
 // ---------- helpers ----------
 function normalizeHour(input) {
@@ -103,20 +98,12 @@ function makeAppointmentDocId(date, hour) {
 
 // ====== WAITLIST (רשימת המתנה) ======
 const WAITLIST_COLLECTION = "waitlists";
-const HOLD_MINUTES = 30; // כמה דקות שמורים לשורה הראשונה ברשימת ההמתנה
+const HOLD_MINUTES = 30;
 
 function makeWaitlistDocId(date, hour) {
   const safeHour = (hour || "").replace(":", "-");
   return `${date}_${safeHour}`;
 }
-
-/**
- * ensureHoldIfNeeded:
- * אם אין תור בשעה הנתונה ויש רשימת המתנה –
- *   -> נותן HOLD (שמירה ל-30 דק׳) ללקוחה הראשונה בתור.
- * אם אין תור / אין רשימה / כבר יש HOLD פעיל – לא עושה כלום.
- */
-// ============ WAITLIST LOGIC (EXPORT) ============
 
 export async function ensureHoldIfNeeded(dateStr, hourStr) {
   const hour = normalizeHour(hourStr);
@@ -151,7 +138,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
     let activeUserId = data.activeUserId || null;
     let holdExpiresAtMs = Number(data.holdExpiresAtMs || 0);
 
-    // ניקוי מוזרויות
     queue = queue.filter((x) => x && x.userId);
     userIds = userIds.filter((id) => queue.some((x) => x.userId === id));
 
@@ -161,13 +147,11 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
       return null;
     }
 
-    // אם עדיין יש תור בפועל בשעה הזו – לא נותנים HOLD
     if (appSnap.exists()) {
       console.log("ensureHoldIfNeeded: appointment already exists – exit");
       return null;
     }
 
-    // אם יש HOLD שפג – מוציאים את אותה משתמשת מהתור
     if (activeUserId && holdExpiresAtMs > 0 && holdExpiresAtMs <= nowMs) {
       console.log(
         "ensureHoldIfNeeded: HOLD expired for",
@@ -188,14 +172,12 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
       return null;
     }
 
-    // אם יש כבר HOLD פעיל – לא נוגעים
     const hasHold = !!activeUserId && holdExpiresAtMs > nowMs;
     if (hasHold) {
       console.log("ensureHoldIfNeeded: already has active hold – exit");
       return null;
     }
 
-    // נותנים HOLD למי שבמקום הראשון בתור
     const next = queue[0];
     if (!next?.userId) {
       console.log("ensureHoldIfNeeded: first in queue has no userId – exit");
@@ -223,7 +205,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
     };
   });
 
-  // לא נוצר HOLD חדש → אין למי לשלוח
   if (!notifyInfo) {
     console.log("ensureHoldIfNeeded: no notifyInfo – skip email");
     return;
@@ -239,7 +220,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
     let toEmail = notifyInfo.userEmail;
     let clientName = notifyInfo.userName;
 
-    // אם האימייל לא שמור בתוך ה־queue – מנסים להביא מה־users
     if (!toEmail) {
       const userSnap = await getDoc(doc(db, "users", notifyInfo.userId));
       if (userSnap.exists()) {
@@ -250,8 +230,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
       }
     }
 
-    // ❗ אם עדיין אין אימייל – מסירים את המשתמשת מהרשימה
-    // ומעבירים HOLD לבאה בתור
     if (!toEmail) {
       console.log(
         "ensureHoldIfNeeded: user has no email, removing from queue and trying next"
@@ -281,7 +259,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
         });
       });
 
-      // מנסות שוב – הפעם עם הלקוחה הבאה בתור
       await ensureHoldIfNeeded(notifyInfo.date, notifyInfo.hour);
       return;
     }
@@ -302,8 +279,6 @@ export async function ensureHoldIfNeeded(dateStr, hourStr) {
     console.log("❌ ensureHoldIfNeeded email send error:", e);
   }
 }
-
-
 
 function isAppointmentPast(dateStr, hourStr) {
   try {
@@ -329,8 +304,6 @@ function parseHoursText(text) {
   return uniq;
 }
 
-// ✅ פורמט טיפולים + זמן כולל (תומך גם ב-serviceType)
-
 function formatServices(appOrReq) {
   const arr = Array.isArray(appOrReq?.servicesSelected)
     ? appOrReq.servicesSelected
@@ -339,15 +312,15 @@ function formatServices(appOrReq) {
 
   const total = Number(appOrReq?.totalDurationMin || 0);
 
-  const servicesText = names.length ? names.join(", ") : appOrReq?.serviceType || null;
+  const servicesText = names.length
+    ? names.join(", ")
+    : appOrReq?.serviceType || null;
 
   let totalText = null;
   if (total > 0) {
     if (total >= 60) {
       const h = Math.floor(total / 60);
       const m = total % 60;
-
-      // פורמט: 1:30 שעות / 2:00 שעות
       totalText = `${h}:${String(m).padStart(2, "0")} שעות`;
     } else {
       totalText = `${total} דק׳`;
@@ -357,7 +330,6 @@ function formatServices(appOrReq) {
   return { servicesText, totalText };
 }
 
-// 📝 תקנון ברירת מחדל
 const DEFAULT_TERMS_TEXT = `
 בביצוע שריון תור במערכת, הינך מאשרת ומצהירה כי קראת והסכמת לתנאים הבאים:
 
@@ -382,7 +354,6 @@ const DEFAULT_TERMS_TEXT = `
 התנאים עשויים להשתנות מעת לעת.
 `.trim();
 
-
 export default function OwnerDashboard({ navigation }) {
   const { width } = useWindowDimensions();
 
@@ -396,70 +367,67 @@ export default function OwnerDashboard({ navigation }) {
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
   const [selectedDate, setSelectedDate] = useState(today);
 
-  // ✅ default שעות לכל הימים
-  const [defaultHours, setDefaultHours] = useState(["15:00", "16:00", "17:00", "18:00", "19:00"]);
+  const [defaultHours, setDefaultHours] = useState([
+    "15:00",
+    "16:00",
+    "17:00",
+    "18:00",
+    "19:00",
+  ]);
   const [defaultText, setDefaultText] = useState(defaultHours.join("\n"));
   const [defaultModalOpen, setDefaultModalOpen] = useState(false);
 
-  // ✅ override שעות לתאריך
   const [availabilityExists, setAvailabilityExists] = useState(false);
   const [availabilityHours, setAvailabilityHours] = useState([]);
   const [availabilityText, setAvailabilityText] = useState("");
   const [availabilityModalOpen, setAvailabilityModalOpen] = useState(false);
 
-  // ✅ בקשות לתור
   const [requests, setRequests] = useState([]);
 
-  // ✅ תורים מאושרים בלבד
   const [appointments, setAppointments] = useState([]);
   const [usersMap, setUsersMap] = useState({});
 
-  // ✅ סימון ימים ביומן (מופרד: מתורים ומבקשות)
   const [busyFromApps, setBusyFromApps] = useState({});
   const [busyFromReqs, setBusyFromReqs] = useState({});
 
-
-  // ✅ טופס שריון ידני
   const [manualHour, setManualHour] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
   const [manualService, setManualService] = useState("");
   const [manualModalOpen, setManualModalOpen] = useState(false);
 
-    // ✅ טיפולים (עריכה לבעלת המערכת)
   const [services, setServices] = useState([]);
-  const [servicesInitial, setServicesInitial] = useState([]); // מצב אחרון שנשמר
+  const [servicesInitial, setServicesInitial] = useState([]);
   const [servicesModalOpen, setServicesModalOpen] = useState(false);
 
   const phoneAccessoryId = "phoneAccessoryId";
   const [phoneFocused, setPhoneFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
-  // ✅ מסך לקוחות פעילים
   const [showUsers, setShowUsers] = useState(false);
   const [allUsers, setAllUsers] = useState([]);
   const [usersSearch, setUsersSearch] = useState("");
 
-  // ✅ תפריט
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // ✅ עריכת תקנון
   const [termsModalOpen, setTermsModalOpen] = useState(false);
   const [termsText, setTermsText] = useState(DEFAULT_TERMS_TEXT);
   const [termsVersion, setTermsVersion] = useState(1);
 
- // ✅ עריכת תמונות רקע
   const [backgroundsModalOpen, setBackgroundsModalOpen] = useState(false);
   const [backgroundAllAppUrl, setBackgroundAllAppUrl] = useState("");
-  const [backgroundOpenRegisAppUrl, setBackgroundOpenRegisAppUrl] = useState("");
+  const [backgroundOpenRegisAppUrl, setBackgroundOpenRegisAppUrl] =
+    useState("");
 
-// 👇 חדש: סטייט לטעינה
-const [backgroundUploading, setBackgroundUploading] = useState(false);
-
+  const [backgroundUploading, setBackgroundUploading] = useState(false);
 
   useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
+    const showSub = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false)
+    );
     return () => {
       showSub.remove();
       hideSub.remove();
@@ -476,7 +444,6 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
 
   function confirmLogout() {
     if (Platform.OS === "web") {
-      // eslint-disable-next-line no-alert
       const ok = window.confirm("בטוחה שתרצי להתנתק?");
       if (ok) handleLogout();
       return;
@@ -487,13 +454,19 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
     ]);
   }
 
-  // ✅ מאזין לברירת מחדל settings/business + טיפולים
+  // settings/business listener
   useEffect(() => {
     const ref = doc(db, "settings", "business");
     const unsub = onSnapshot(
       ref,
       (snap) => {
-        const fallbackHours = ["15:00", "16:00", "17:00", "18:00", "19:00"];
+        const fallbackHours = [
+          "15:00",
+          "16:00",
+          "17:00",
+          "18:00",
+          "19:00",
+        ];
         const fallbackServices = [
           { id: "manicure", name: "מניקור", durationMin: 50 },
           {
@@ -513,13 +486,9 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
         ];
 
         if (!snap.exists()) {
-          // שעות ברירת מחדל
           setDefaultHours(fallbackHours);
           setDefaultText(fallbackHours.join("\n"));
-          // טיפולים ברירת מחדל לעריכה
           setServices(fallbackServices);
-
-          // ✅ אם אין מסמך – גם מאפסים רקעים (ריק = השתמש ברירת מחדל מתוך האפליקציה)
           setBackgroundAllAppUrl("");
           setBackgroundOpenRegisAppUrl("");
           return;
@@ -527,22 +496,20 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
 
         const data = snap.data() || {};
 
-        // שעות
         const arr = data.defaultHours || [];
-        const safeHours = Array.isArray(arr) && arr.length ? arr : fallbackHours;
+        const safeHours =
+          Array.isArray(arr) && arr.length ? arr : fallbackHours;
         safeHours.sort((a, b) => timeToMin(a) - timeToMin(b));
         setDefaultHours(safeHours);
         setDefaultText(safeHours.join("\n"));
 
-        // טיפולים
         const srv = Array.isArray(data.services) ? data.services : [];
         if (srv.length) {
-          // הופך למבנה מסודר לעריכה
           const mapped = srv.map((s, idx) => ({
             id: String(s.id ?? `service_${idx}`),
             name: String(s.name ?? ""),
-            // שומרים כמחרוזת / מספר – DayScreen כבר הופך למספר
-            durationMin: s.durationMin != null ? String(s.durationMin) : "",
+            durationMin:
+              s.durationMin != null ? String(s.durationMin) : "",
           }));
           setServices(mapped);
           setServicesInitial(mapped);
@@ -555,7 +522,6 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
           setServicesInitial(mappedFallback);
         }
 
-        // ✅ תמונות רקע (כאן הכנסה של סעיף 2)
         const bgAll =
           typeof data.backgroundAllAppUrl === "string"
             ? data.backgroundAllAppUrl
@@ -574,7 +540,13 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
           err?.code,
           err?.message
         );
-        const fallbackHours = ["15:00", "16:00", "17:00", "18:00", "19:00"];
+        const fallbackHours = [
+          "15:00",
+          "16:00",
+          "17:00",
+          "18:00",
+          "19:00",
+        ];
         const fallbackServices = [
           { id: "manicure", name: "מניקור", durationMin: "50" },
           { id: "gel", name: "ג׳ל", durationMin: "60" },
@@ -583,8 +555,6 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
         setDefaultText(fallbackHours.join("\n"));
         setServices(fallbackServices);
         setServicesInitial(fallbackServices);
-
-        // במקרה של שגיאה – נשארים בלי URL כדי שייפול לברירת מחדל
         setBackgroundAllAppUrl("");
         setBackgroundOpenRegisAppUrl("");
       }
@@ -592,28 +562,26 @@ const [backgroundUploading, setBackgroundUploading] = useState(false);
     return () => unsub();
   }, []);
 
+  // settings/terms listener
+  useEffect(() => {
+    const ref = doc(db, "settings", "terms");
 
-  // ✅ מאזין לתקנון – settings/terms
-useEffect(() => {
-  const ref = doc(db, "settings", "terms");
+    const unsub = onSnapshot(ref, (snap) => {
+      if (!snap.exists()) {
+        setTermsText(DEFAULT_TERMS_TEXT);
+        setTermsVersion(1);
+        return;
+      }
 
-  const unsub = onSnapshot(ref, (snap) => {
-    if (!snap.exists()) {
-      setTermsText(DEFAULT_TERMS_TEXT);
-      setTermsVersion(1);
-      return;
-    }
+      const data = snap.data() || {};
+      setTermsText((data.text || "").trim() || DEFAULT_TERMS_TEXT);
+      setTermsVersion(data.version || 1);
+    });
 
-    const data = snap.data() || {};
-    setTermsText((data.text || "").trim() || DEFAULT_TERMS_TEXT);
-    setTermsVersion(data.version || 1);
-  });
+    return () => unsub();
+  }, []);
 
-  return () => unsub();
-}, []);
-
-
-  // ✅ override שעות בזמן אמת לתאריך הנבחר
+  // availability override listener
   useEffect(() => {
     const ref = doc(db, "availability", selectedDate);
     const unsub = onSnapshot(
@@ -633,7 +601,11 @@ useEffect(() => {
         setAvailabilityText(safe.join("\n"));
       },
       (err) => {
-        console.log("❌ availability listen error:", err?.code, err?.message);
+        console.log(
+          "❌ availability listen error:",
+          err?.code,
+          err?.message
+        );
         setAvailabilityExists(false);
         setAvailabilityHours([]);
         setAvailabilityText("");
@@ -642,146 +614,200 @@ useEffect(() => {
     return () => unsub();
   }, [selectedDate]);
 
-  // שעות לתאריך (override אם קיים, אחרת default)
   const hoursForSelectedDate = useMemo(() => {
     if (availabilityExists) return availabilityHours;
     return defaultHours;
   }, [availabilityExists, availabilityHours, defaultHours]);
 
-// ✅ בקשות ממתינות לתאריך הנבחר (לכותרת ולרשימה למטה)
-useEffect(() => {
-  // במסך "לקוחות פעילים" אין צורך להאזין לבקשות
-  if (showUsers) return;
+  // pending requests for selected date
+  useEffect(() => {
+    if (showUsers) return;
 
-  const qReq = query(
-    collection(db, "appointmentRequests"),
-    where("date", "==", selectedDate),
-    where("status", "==", "pending")
-  );
+    const qReq = query(
+      collection(db, "appointmentRequests"),
+      where("date", "==", selectedDate),
+      where("status", "==", "pending")
+    );
 
-  const unsub = onSnapshot(
-    qReq,
-    (snap) => {
-      const arr = snap.docs
-        .map((d) => {
+    const unsub = onSnapshot(
+      qReq,
+      (snap) => {
+        const arr = snap.docs
+          .map((d) => {
+            const data = d.data() || {};
+            const hour = normalizeHour(data.hour);
+
+            return {
+              id: d.id,
+              ...data,
+              hour,
+            };
+          })
+          .filter((r) => !!r.hour)
+          .sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+
+        console.log(
+          "📥 pending requests for",
+          selectedDate,
+          "=>",
+          arr.length
+        );
+
+        setRequests(arr);
+      },
+      (err) => {
+        console.log(
+          "❌ appointmentRequests listen error:",
+          err?.code,
+          err?.message
+        );
+        showAlert(
+          "שגיאה בטעינת בקשות ממתינות",
+          err?.message || "לא הצליח לטעון בקשות. בדקי אינדקס/הרשאות."
+        );
+        setRequests([]);
+      }
+    );
+
+    return () => unsub();
+  }, [selectedDate, showUsers]);
+
+  // ✅ תורים מאושרים לתאריך הנבחר
+  // ✅ תורים מאושרים לתאריך הנבחר (מתוקן)
+  useEffect(() => {
+    if (showUsers) return;
+
+    const qApps = query(
+      collection(db, "appointments"),
+      where("date", "==", selectedDate)
+    );
+
+    const unsub = onSnapshot(
+      qApps,
+      (snap) => {
+        const arr = snap.docs
+          .map((d) => {
+            const data = d.data() || {};
+            const hour = normalizeHour(data.hour);
+
+            return {
+              docId: d.id,
+              ...data,
+              hour,
+            };
+          })
+          .filter((a) => {
+            if (!a.hour) return false;
+
+            const status = a.status || null;
+
+            // סטטוסים שלא נחשבים לתור מאושר
+            const isPendingOrCancelled =
+              status === "pending" ||
+              status === "cancelled" ||
+              status === "rejected";
+
+            // כל מה שלא pending / cancelled / rejected = נחשב מאושר
+            const isApproved = !isPendingOrCancelled;
+
+            // אם isHead לא קיים – נניח שהוא true כדי לא להפיל תורים ישנים
+            const isHead =
+              a.isHead === undefined ? true : a.isHead === true;
+
+            return isApproved && isHead;
+          })
+          .sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+
+        setAppointments(arr);
+      },
+      (err) => {
+        console.log(
+          "❌ approved appointments listen error:",
+          err?.code,
+          err?.message
+        );
+        showAlert(
+          "שגיאה בטעינת תורים מאושרים",
+          err?.message || "לא הצליח לטעון תורים מאושרים."
+        );
+        setAppointments([]);
+      }
+    );
+
+    return () => unsub();
+  }, [selectedDate, showUsers]);;
+
+  // busy days maps
+  useEffect(() => {
+    if (showUsers) return;
+
+    const appsRef = collection(db, "appointments");
+    const unsubApps = onSnapshot(
+      appsRef,
+      (snap) => {
+        const next = {};
+
+        snap.docs.forEach((d) => {
           const data = d.data() || {};
-          const hour = normalizeHour(data.hour);
+          const status = data.status;
+          const date = data.date;
+          const hour = data.hour;
 
-          return {
-            id: d.id,
-            ...data,
-            hour,
-          };
-        })
-        // רק בקשות שיש להן שעה תקינה
-        .filter((r) => !!r.hour)
-        // מיון לפי שעה
-        .sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+          if (
+            status === "approved" &&
+            date &&
+            hour &&
+            !isAppointmentPast(date, hour)
+          ) {
+            next[date] = true;
+          }
+        });
 
-      console.log(
-        "📥 pending requests for",
-        selectedDate,
-        "=>",
-        arr.length
-      );
+        setBusyFromApps(next);
+      },
+      (err) => {
+        console.log(
+          "❌ busy days appointments error:",
+          err?.code,
+          err?.message
+        );
+      }
+    );
 
-      setRequests(arr);
-    },
-    (err) => {
-      console.log(
-        "❌ appointmentRequests listen error:",
-        err?.code,
-        err?.message
-      );
-      showAlert(
-        "שגיאה בטעינת בקשות ממתינות",
-        err?.message || "לא הצליח לטעון בקשות. בדקי אינדקס/הרשאות."
-      );
-      setRequests([]);
-    }
-  );
+    const reqRef = collection(db, "appointmentRequests");
+    const unsubReq = onSnapshot(
+      reqRef,
+      (snap) => {
+        const next = {};
 
-  return () => unsub();
-}, [selectedDate, showUsers]);
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const status = data.status;
+          const date = data.date;
 
-useEffect(() => {
-  if (showUsers) return;
+          if (status === "pending" && date) {
+            next[date] = true;
+          }
+        });
 
-  // ✅ כל התורים, נסנן לפי status בתוך ה־callback
-  const appsRef = collection(db, "appointments");
-  const unsubApps = onSnapshot(
-    appsRef,
-    (snap) => {
-      const next = {};
+        setBusyFromReqs(next);
+      },
+      (err) => {
+        console.log(
+          "❌ busy days requests error:",
+          err?.code,
+          err?.message
+        );
+      }
+    );
 
-      snap.docs.forEach((d) => {
-        const data = d.data() || {};
-        const status = data.status;
-        const date = data.date;
-        const hour = data.hour;
+    return () => {
+      unsubApps();
+      unsubReq();
+    };
+  }, [showUsers]);
 
-        // נספור רק תורים מאושרים *שעדיין לא עברו*
-        if (
-          status === "approved" &&
-          date &&
-          hour &&
-          !isAppointmentPast(date, hour)
-        ) {
-          next[date] = true;
-        }
-      });
-
-      setBusyFromApps(next);
-    },
-    (err) => {
-      console.log(
-        "❌ busy days appointments error:",
-        err?.code,
-        err?.message
-      );
-    }
-  );
-
-  // ✅ כל הבקשות, נסנן ל-pending בלבד
-  const reqRef = collection(db, "appointmentRequests");
-  const unsubReq = onSnapshot(
-    reqRef,
-    (snap) => {
-      const next = {};
-
-      snap.docs.forEach((d) => {
-        const data = d.data() || {};
-        const status = data.status;
-        const date = data.date;
-
-        // רק בקשות במצב pending
-        if (status === "pending" && date) {
-          next[date] = true;
-        }
-      });
-
-      setBusyFromReqs(next);
-    },
-    (err) => {
-      console.log(
-        "❌ busy days requests error:",
-        err?.code,
-        err?.message
-      );
-    }
-  );
-
-  return () => {
-    unsubApps();
-    unsubReq();
-  };
-}, [showUsers]);
-
-
-
-
-
-  // ✅ טעינת פרטי משתמשים עבור בקשות + תורים
+  // load users for requests + appointments
   useEffect(() => {
     if (showUsers) return;
 
@@ -814,14 +840,18 @@ useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointments, requests, showUsers]);
 
-  // ✅ רשימת משתמשים בזמן אמת
+  // live users list for "לקוחות פעילים"
   useEffect(() => {
     if (!showUsers) return;
 
-    const qUsers = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    const qUsers = query(
+      collection(db, "users"),
+      orderBy("createdAt", "desc")
+    );
     const unsub = onSnapshot(
       qUsers,
-      (snap) => setAllUsers(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))),
+      (snap) =>
+        setAllUsers(snap.docs.map((d) => ({ uid: d.id, ...d.data() }))),
       (err) => {
         console.log("❌ users list listen error:", err?.code, err?.message);
         showAlert("שגיאה", "לא הצליח לטעון לקוחות");
@@ -833,14 +863,15 @@ useEffect(() => {
   const filteredUsers = useMemo(() => {
     const currentUid = auth.currentUser?.uid || null;
 
-    // בסיס: כל המשתמשים חוץ מהמשתמש/ת הנוכחי/ת (בעלת העסק)
     const base = allUsers.filter((u) => u.uid !== currentUid);
 
     const t = (usersSearch || "").trim().toLowerCase();
     if (!t) return base;
 
     return base.filter((u) => {
-      const name = `${u.firstName || ""} ${u.lastName || ""}`.toLowerCase();
+      const name = `${u.firstName || ""} ${
+        u.lastName || ""
+      }`.toLowerCase();
       const email = (u.email || "").toLowerCase();
       const phone = (u.phone || "").toString().toLowerCase();
       const displayName = (u.displayName || "").toLowerCase();
@@ -854,8 +885,6 @@ useEffect(() => {
     });
   }, [allUsers, usersSearch]);
 
-
-  // ---------- actions ----------
   async function saveDefaultHours() {
     const hours = parseHoursText(defaultText);
     if (hours.length === 0) {
@@ -886,99 +915,85 @@ useEffect(() => {
     }
   }
 
-async function pickAndUploadBackground(kind) {
-  // kind יכול להיות "openRegis" או "allApp"
-
-  if (!auth.currentUser?.uid) {
-    showAlert("צריך להתחבר", "כדי לשנות תמונת רקע צריך להתחבר.");
-    return;
-  }
-
-  try {
-    // 1️⃣ הרשאות – במובייל בלבד
-    if (Platform.OS !== "web") {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") {
-        showAlert(
-          "שגיאה",
-          "צריך לאשר גישה לגלריה בהגדרות המכשיר."
-        );
-        return;
-      }
-    }
-
-    // 2️⃣ בחירת תמונה – אותו רעיון כמו בגלריה
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-      allowsEditing: true,
-    });
-
-    if (!res || res.canceled || !res.assets || !res.assets.length) {
+  async function pickAndUploadBackground(kind) {
+    if (!auth.currentUser?.uid) {
+      showAlert(
+        "צריך להתחבר",
+        "כדי לשנות תמונת רקע צריך להתחבר."
+      );
       return;
     }
-
-    const asset = res.assets[0];
-    if (!asset.uri) {
-      showAlert("שגיאה", "לא נמצאה כתובת לתמונה");
-      return;
-    }
-
-    // 3️⃣ מתחילים "העלאה" – למעשה עיבוד + כתיבה ל-Firestore
-    setBackgroundUploading(true);
 
     try {
-      // מקטינים קצת כמו בגלריה
-      const manipulated = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        [{ resize: { width: 900 } }],
-        {
-          compress: 0.7,
-          format: ImageManipulator.SaveFormat.JPEG,
-          base64: true,
+      if (Platform.OS !== "web") {
+        const { status } =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== "granted") {
+          showAlert("שגיאה", "צריך לאשר גישה לגלריה בהגדרות המכשיר.");
+          return;
         }
-      );
+      }
 
-      if (!manipulated?.base64) {
-        showAlert("שגיאה", "לא הצליח לעבד את התמונה");
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+        allowsEditing: true,
+      });
+
+      if (!res || res.canceled || !res.assets || !res.assets.length) {
         return;
       }
 
-      const dataUrl = `data:image/jpeg;base64,${manipulated.base64}`;
-
-      // 4️⃣ שמירה ל-Firestore (בלי Storage)
-      await setDoc(
-        doc(db, "settings", "business"),
-        kind === "openRegis"
-          ? { backgroundOpenRegisAppUrl: dataUrl }
-          : { backgroundAllAppUrl: dataUrl },
-        { merge: true }
-      );
-
-      // מעדכנים גם ב-state כדי שתראי את זה מיד
-      if (kind === "openRegis") {
-        setBackgroundOpenRegisAppUrl(dataUrl);
-      } else {
-        setBackgroundAllAppUrl(dataUrl);
+      const asset = res.assets[0];
+      if (!asset.uri) {
+        showAlert("שגיאה", "לא נמצאה כתובת לתמונה");
+        return;
       }
 
-      showAlert("בוצע", "תמונת הרקע עודכנה בהצלחה");
-    } finally {
+      setBackgroundUploading(true);
+
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          [{ resize: { width: 900 } }],
+          {
+            compress: 0.7,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          }
+        );
+
+        if (!manipulated?.base64) {
+          showAlert("שגיאה", "לא הצליח לעבד את התמונה");
+          return;
+        }
+
+        const dataUrl = `data:image/jpeg;base64,${manipulated.base64}`;
+
+        await setDoc(
+          doc(db, "settings", "business"),
+          kind === "openRegis"
+            ? { backgroundOpenRegisAppUrl: dataUrl }
+            : { backgroundAllAppUrl: dataUrl },
+          { merge: true }
+        );
+
+        if (kind === "openRegis") {
+          setBackgroundOpenRegisAppUrl(dataUrl);
+        } else {
+          setBackgroundAllAppUrl(dataUrl);
+        }
+
+        showAlert("בוצע", "תמונת הרקע עודכנה בהצלחה");
+      } finally {
+        setBackgroundUploading(false);
+      }
+    } catch (e) {
+      console.log("❌ pickAndUploadBackground error:", e);
+      showAlert("שגיאה", e?.message || "לא הצליח להעלות תמונה");
       setBackgroundUploading(false);
     }
-  } catch (e) {
-    console.log("❌ pickAndUploadBackground error:", e);
-    showAlert("שגיאה", e?.message || "לא הצליח להעלות תמונה");
-    setBackgroundUploading(false);
   }
-}
-
-
-
-
-
-
 
   async function saveAvailabilityForDate() {
     const hours = parseHoursText(availabilityText);
@@ -1015,23 +1030,28 @@ async function pickAndUploadBackground(kind) {
     }
   }
 
-    // ✅ שמירת רשימת טיפולים (שם + זמן בדקות) למסמך settings/business
   async function saveServices() {
-    // מנקים טיפולים ריקים ומוודאים זמן תקין
     const cleaned = (services || [])
       .map((s, idx) => {
         const name = (s.name || "").trim();
-        const minutes = parseInt((s.durationMin || "").toString().trim(), 10);
+        const minutes = parseInt(
+          (s.durationMin || "").toString().trim(),
+          10
+        );
         return {
           id: (s.id || "").trim() || `service_${idx}`,
           name,
-          durationMin: Number.isFinite(minutes) && minutes > 0 ? minutes : 0,
+          durationMin:
+            Number.isFinite(minutes) && minutes > 0 ? minutes : 0,
         };
       })
       .filter((s) => s.name && s.durationMin > 0);
 
     if (!cleaned.length) {
-      showAlert("שגיאה", "לפחות טיפול אחד חייב להיות עם שם וזמן גדול מ-0.");
+      showAlert(
+        "שגיאה",
+        "לפחות טיפול אחד חייב להיות עם שם וזמן גדול מ-0."
+      );
       return;
     }
 
@@ -1050,7 +1070,6 @@ async function pickAndUploadBackground(kind) {
         );
       });
 
-      // בונים ייצוג לעריכה (זמן כמחרוזת)
       const edited = cleaned.map((s, idx) => ({
         id: s.id || `service_${idx}`,
         name: s.name,
@@ -1068,437 +1087,350 @@ async function pickAndUploadBackground(kind) {
     }
   }
 
-  // ✅ שמירת תקנון + העלאת גרסה
-async function saveTerms() {
-  const text = (termsText || "").trim();
-  if (!text) {
-    showAlert("שגיאה", "התקנון לא יכול להיות ריק");
-    return;
-  }
+  async function saveTerms() {
+    const text = (termsText || "").trim();
+    if (!text) {
+      showAlert("שגיאה", "התקנון לא יכול להיות ריק");
+      return;
+    }
 
-  const ref = doc(db, "settings", "terms");
+    const ref = doc(db, "settings", "terms");
 
-  try {
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(ref);
-      const prevVersion = snap.exists() ? snap.data().version || 0 : 0;
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        const prevVersion = snap.exists() ? snap.data().version || 0 : 0;
 
-      tx.set(ref, {
-        text,
-        version: prevVersion + 1,
-        updatedAt: serverTimestamp(),
-        updatedBy: auth.currentUser?.uid || null,
+        tx.set(ref, {
+          text,
+          version: prevVersion + 1,
+          updatedAt: serverTimestamp(),
+          updatedBy: auth.currentUser?.uid || null,
+        });
       });
-    });
 
-    showAlert("בוצע", "התקנון עודכן – הלקוחות יתבקשו לאשר מחדש");
-    setTermsModalOpen(false);
-    Keyboard.dismiss();
-  } catch (e) {
-    showAlert("שגיאה", e?.message || "לא הצליח לשמור תקנון");
+      showAlert("בוצע", "התקנון עודכן – הלקוחות יתבקשו לאשר מחדש");
+      setTermsModalOpen(false);
+      Keyboard.dismiss();
+    } catch (e) {
+      showAlert("שגיאה", e?.message || "לא הצליח לשמור תקנון");
+    }
   }
-}
-
 
   async function approveRequest(req) {
-  const { id, date, hour, userId } = req;
+    const { id, date, userId } = req;
 
-  const groupId = req.groupId || makeAppointmentDocId(date, hour);
-  const slots = Array.isArray(req.slots) && req.slots.length ? req.slots : [hour];
+    const hour = normalizeHour(req.hour);
 
-  const reqRef = doc(db, "appointmentRequests", id);
-  const userResRef = doc(db, "userReservations", userId);
+    const groupId = req.groupId || makeAppointmentDocId(date, hour);
 
-  try {
-    // ===============================
-    // שלב 1: אישור התור ב-Firestore
-    // ===============================
-    await runTransaction(db, async (tx) => {
-      const reqSnap = await tx.get(reqRef);
-      if (!reqSnap.exists()) throw new Error("הבקשה כבר לא קיימת");
+    const slots =
+      Array.isArray(req.slots) && req.slots.length ? req.slots : [hour];
 
-      const liveReq = reqSnap.data();
-      if (liveReq.status !== "pending") {
-        throw new Error("הבקשה כבר טופלה");
-      }
+    const reqRef = doc(db, "appointmentRequests", id);
+    const userResRef = doc(db, "userReservations", userId);
 
-      const userResSnap = await tx.get(userResRef);
-      if (!userResSnap.exists()) {
-        // המשתמש ביטל לפני האישור
+    try {
+      await runTransaction(db, async (tx) => {
+        const reqSnap = await tx.get(reqRef);
+        if (!reqSnap.exists()) {
+          throw new Error("הבקשה כבר לא קיימת");
+        }
+
+        const liveReq = reqSnap.data() || {};
+        if (liveReq.status !== "pending") {
+          throw new Error("הבקשה כבר טופלה");
+        }
+
+        const userResSnap = await tx.get(userResRef);
+        if (!userResSnap.exists()) {
+          tx.update(reqRef, {
+            status: "cancelled",
+            decidedAt: serverTimestamp(),
+            decidedBy: auth.currentUser?.uid || null,
+            cancelReason: "user_reservation_missing",
+          });
+          throw new Error("הלקוחה ביטלה את התור לפני האישור");
+        }
+
+        const appRefs = slots.map((h) =>
+          doc(
+            db,
+            "appointments",
+            makeAppointmentDocId(date, normalizeHour(h))
+          )
+        );
+
+        const appSnaps = [];
+        for (const r of appRefs) {
+          appSnaps.push(await tx.get(r));
+        }
+
+        for (let i = 0; i < appSnaps.length; i++) {
+          const snap = appSnaps[i];
+          const slotHour = normalizeHour(slots[i]);
+
+          if (!snap.exists()) {
+            throw new Error(`חסר סלוט ${slotHour}`);
+          }
+
+          const live = snap.data() || {};
+          if (live.status !== "pending") {
+            throw new Error(`הסלוט ${slotHour} כבר לא ממתין`);
+          }
+          if (live.userId !== userId) {
+            throw new Error(`הסלוט ${slotHour} שייך למשתמש אחר`);
+          }
+        }
+
+        appRefs.forEach((ref, idx) => {
+          const slotHour = normalizeHour(slots[idx]);
+
+          tx.set(
+            ref,
+            {
+              date,
+              hour: slotHour,
+              userId,
+              status: "approved",
+              approvedAt: serverTimestamp(),
+              approvedBy: auth.currentUser?.uid || null,
+              source: "request_approved",
+
+              groupId,
+              slots: slots.map((h) => normalizeHour(h)),
+              isHead: idx === 0,
+
+              servicesSelected: Array.isArray(liveReq.servicesSelected)
+                ? liveReq.servicesSelected
+                : [],
+              totalDurationMin: Number(liveReq.totalDurationMin || 0),
+            },
+            { merge: true }
+          );
+        });
+
+        tx.set(
+          userResRef,
+          {
+            status: "approved",
+            approvedAt: serverTimestamp(),
+            approvedBy: auth.currentUser?.uid || null,
+            approvedAlertShown: false,
+            cancelledAlertShown: false,
+            appointmentId: groupId,
+            date,
+            hour,
+            groupId,
+            slots: slots.map((h) => normalizeHour(h)),
+          },
+          { merge: true }
+        );
+
         tx.update(reqRef, {
-          status: "cancelled",
+          status: "approved",
           decidedAt: serverTimestamp(),
           decidedBy: auth.currentUser?.uid || null,
-          cancelReason: "user_reservation_missing",
         });
-        throw new Error("הלקוחה ביטלה את התור לפני האישור");
-      }
-
-      const appRefs = slots.map((h) =>
-        doc(db, "appointments", makeAppointmentDocId(date, h))
-      );
-
-      const appSnaps = [];
-      for (const r of appRefs) {
-        appSnaps.push(await tx.get(r));
-      }
-
-      for (let i = 0; i < appSnaps.length; i++) {
-        const snap = appSnaps[i];
-        if (!snap.exists()) {
-          throw new Error(`חסר סלוט ${slots[i]}`);
-        }
-
-        const live = snap.data();
-        if (live.status !== "pending") {
-          throw new Error(`הסלוט ${slots[i]} כבר לא ממתין`);
-        }
-        if (live.userId !== userId) {
-          throw new Error(`הסלוט ${slots[i]} שייך למשתמש אחר`);
-        }
-      }
-
-      // מאשרים את כל הסלוטים
-      for (const r of appRefs) {
-        tx.update(r, {
-          status: "approved",
-          approvedAt: serverTimestamp(),
-          approvedBy: auth.currentUser?.uid || null,
-          source: "request_approved",
-        });
-      }
-
-      // מעדכנים userReservations + מאפסים פלגי התראות
-      tx.set(
-        userResRef,
-        {
-          status: "approved",
-          approvedAt: serverTimestamp(),
-          approvedBy: auth.currentUser?.uid || null,
-          approvedAlertShown: false,   // 👈 כדי שהלקוחה תראה את הודעת האישור פעם אחת
-          cancelledAlertShown: false,  // 👈 ליתר ביטחון
-        },
-        { merge: true }
-      );
-
-
-      // מעדכנים את הבקשה
-      tx.update(reqRef, {
-        status: "approved",
-        decidedAt: serverTimestamp(),
-        decidedBy: auth.currentUser?.uid || null,
       });
-    });
 
-    // ===============================
-    // שלב 2: שליחת מייל ללקוחה (רק Web)
-    // ===============================
-    try {
-      if (Platform.OS === "web") {
-        const toEmail =
-          req.userEmail || usersMap?.[userId]?.email || "";
+      // עדכון state מקומי
+      setRequests((prev) => prev.filter((r) => r.id !== req.id));
 
-        const clientName =
-          usersMap?.[userId]?.displayName ||
-          `${usersMap?.[userId]?.firstName || ""} ${usersMap?.[userId]?.lastName || ""}`.trim() ||
-          "לקוחה";
+      setAppointments((prev) => {
+        const exists = prev.some(
+          (a) =>
+            a.date === date &&
+            a.hour === hour &&
+            (a.userId || null) === (userId || null)
+        );
+        if (exists) return prev;
 
-        if (toEmail) {
+        const newApp = {
+          docId: makeAppointmentDocId(date, hour),
+          date,
+          hour,
+          userId: userId || null,
+          customerName: null,
+          customerPhone: null,
+          servicesSelected: req.servicesSelected || [],
+          totalDurationMin: req.totalDurationMin || 0,
+          status: "approved",
+          isHead: true,
+          slots,
+          groupId,
+          source: "request_approved",
+        };
+
+        const next = [...prev, newApp];
+        next.sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+        return next;
+      });
+
+      try {
+        if (Platform.OS === "web") {
+          const toEmail = req.userEmail || usersMap?.[userId]?.email || "";
+
+          const clientName =
+            usersMap?.[userId]?.displayName ||
+            `${usersMap?.[userId]?.firstName || ""} ${
+              usersMap?.[userId]?.lastName || ""
+            }`.trim() ||
+            "לקוחה";
+
+          if (toEmail) {
             await sendAppointmentEmail({
               toEmail,
               clientName,
               date,
               time: hour,
               businessName: "Rotem Studio Nails",
-              servicesSelected: req.servicesSelected || [], // ✅ חדש
+              servicesSelected: req.servicesSelected || [],
             });
-
+          } else {
+            console.log("⚠️ אין אימייל ללקוחה – לא נשלח מייל");
+          }
         } else {
-          console.log("⚠️ אין אימייל ללקוחה – לא נשלח מייל");
+          console.log("📧 דילוג על EmailJS – לא Web (iOS/Android)");
         }
-      } else {
-        console.log("📧 דילוג על EmailJS – לא Web (iOS/Android)");
-      }
-    } catch (mailErr) {
-      console.log("❌ sendAppointmentEmail error (approveRequest):", mailErr);
-    }
-
-    // ===============================
-    // שלב 3: הודעה לבעלת העסק
-    // ===============================
-    showAlert("אושר ✅", `אישרת את הבקשה לשעה ${hour}`);
-  } catch (e) {
-    showAlert("שגיאה", e?.message || "לא הצליח לאשר בקשה");
-  }
-}
-
-
-// ✅ דחיית בקשה + שליחת מייל דחייה (רק Web)
-// ✅ דחיית בקשה + שליחת מייל דחייה (רק Web) + עדכון רשימת המתנה
-async function rejectRequest(req) {
-  const reqRef = doc(db, "appointmentRequests", req.id);
-  const userResRef = doc(db, "userReservations", req.userId);
-
-  const groupId = req.groupId || makeAppointmentDocId(req.date, req.hour);
-  const slots =
-    Array.isArray(req.slots) && req.slots.length ? req.slots : [req.hour];
-
-  try {
-    // ===============================
-    // שלב 1: דחיית הבקשה ב-Firestore
-    // ===============================
-    await runTransaction(db, async (tx) => {
-      const s = await tx.get(reqRef);
-      if (!s.exists()) throw new Error("הבקשה כבר לא קיימת");
-      if (s.data()?.status !== "pending") throw new Error("הבקשה כבר טופלה");
-
-      const ur = await tx.get(userResRef);
-
-      const slotRefs = slots.map((h) =>
-        doc(db, "appointments", makeAppointmentDocId(req.date, h))
-      );
-
-      const slotSnaps = [];
-      for (const r of slotRefs) slotSnaps.push(await tx.get(r));
-
-      // סטטוס הבקשה
-      tx.update(reqRef, {
-        status: "rejected",
-        decidedAt: serverTimestamp(),
-        decidedBy: auth.currentUser?.uid || null,
-      });
-
-      // מוחקים את הסלוטים הממתינים של אותה בקשה
-      for (let i = 0; i < slotSnaps.length; i++) {
-        const snap = slotSnaps[i];
-        if (!snap.exists()) continue;
-
-        const live = snap.data();
-        const sameGroup = (live?.groupId || groupId) === groupId;
-
-        if (live?.status === "pending" && sameGroup) {
-          tx.delete(slotRefs[i]);
-        }
-      }
-
-      // מעדכנים userReservations ל-rejected
-      if (ur.exists()) {
-        tx.set(
-          userResRef,
-          {
-            status: "rejected",
-            rejectedAt: serverTimestamp(),
-            appointmentId: null,
-            date: null,
-            hour: null,
-            groupId: null,
-            slots: [],
-          },
-          { merge: true }
+      } catch (mailErr) {
+        console.log(
+          "❌ sendAppointmentEmail error (approveRequest):",
+          mailErr
         );
       }
-    });
 
-    // ===============================
-    // שלב 2: שליחת מייל דחייה (רק Web)
-    // ===============================
-    try {
-      if (Platform.OS === "web") {
-        const toEmail = req.userEmail || usersMap?.[req.userId]?.email || "";
-
-        const clientName =
-          usersMap?.[req.userId]?.displayName ||
-          `${usersMap?.[req.userId]?.firstName || ""} ${
-            usersMap?.[req.userId]?.lastName || ""
-          }`.trim() ||
-          "לקוחה";
-
-        if (toEmail) {
-          await sendAppointmentRejectedEmail({
-            toEmail,
-            clientName,
-            date: req.date,
-            time: req.hour,
-            businessName: "Rotem Studio Nails",
-            servicesSelected: req.servicesSelected || [],
-          });
-        } else {
-          console.log("⚠️ אין אימייל ללקוחה – לא נשלח מייל דחייה");
-        }
-      } else {
-        console.log("📧 דילוג על EmailJS – לא Web (iOS/Android)");
-      }
-    } catch (mailErr) {
-      console.log("❌ sendAppointmentRejectedEmail error:", mailErr);
+      showAlert("אושר ✅", `אישרת את הבקשה לשעה ${hour}`);
+    } catch (e) {
+      showAlert("שגיאה", e?.message || "לא הצליח לאשר בקשה");
     }
-
-    // ===============================
-    // שלב 3: הודעה לבעלת העסק
-    // ===============================
-    showAlert("נדחה", "הבקשה נדחתה");
-
-    // ✅ שלב 4: אחרי דחייה – להעביר HOLD לבאה בתור ברשימת המתנה
-    await ensureHoldIfNeeded(req.date, req.hour);
-  } catch (e) {
-    showAlert("שגיאה", e?.message || "לא הצליח לדחות בקשה");
-  }
-}
-
-
-
-  // ✅ ביטול תור מאושר
-// ✅ ביטול תור מאושר ע"י בעלת העסק + עדכון רשימת המתנה
-async function ownerCancelAppointment(app) {
-  const { docId, userId, date, hour } = app;
-
-  if (isAppointmentPast(date, hour)) {
-    showAlert("לא ניתן לבטל", "התור כבר עבר ולכן אי אפשר לבטל אותו.");
-    return;
   }
 
-  const groupId = app.groupId || null;
-  const slots =
-    Array.isArray(app.slots) && app.slots.length ? app.slots : [hour];
+  async function rejectRequest(req) {
+    const reqRef = doc(db, "appointmentRequests", req.id);
+    const userResRef = doc(db, "userReservations", req.userId);
 
-  showAlert("ביטול תור", `לבטל את התור של ${hour} בתאריך ${date}?`, [
-    { text: "לא", style: "cancel" },
-    {
-      text: "כן, לבטל",
-      style: "destructive",
-      onPress: async () => {
-        try {
-          const userResRef = userId
-            ? doc(db, "userReservations", userId)
-            : null;
+    const groupId =
+      req.groupId || makeAppointmentDocId(req.date, req.hour);
+    const slots =
+      Array.isArray(req.slots) && req.slots.length
+        ? req.slots
+        : [req.hour];
 
-          await runTransaction(db, async (tx) => {
-            let userResSnap = null;
-            if (userResRef) userResSnap = await tx.get(userResRef);
+    try {
+      await runTransaction(db, async (tx) => {
+        const s = await tx.get(reqRef);
+        if (!s.exists()) throw new Error("הבקשה כבר לא קיימת");
+        if (s.data()?.status !== "pending")
+          throw new Error("הבקשה כבר טופלה");
 
-            const slotRefs = slots.map((h) =>
-              doc(db, "appointments", makeAppointmentDocId(date, h))
-            );
-            const slotSnaps = [];
-            for (const r of slotRefs) slotSnaps.push(await tx.get(r));
+        const ur = await tx.get(userResRef);
 
-            // מוחקים את כל הסלוטים של התור הזה (כל השעות בקבוצה)
-            for (let i = 0; i < slotSnaps.length; i++) {
-              const snap = slotSnaps[i];
-              if (!snap.exists()) continue;
+        const slotRefs = slots.map((h) =>
+          doc(db, "appointments", makeAppointmentDocId(req.date, h))
+        );
 
-              const live = snap.data();
-              const sameGroup = groupId ? live?.groupId === groupId : true;
-              const sameUser = userId ? live?.userId === userId : true;
+        const slotSnaps = [];
+        for (const r of slotRefs) slotSnaps.push(await tx.get(r));
 
-              if (
-                sameGroup &&
-                sameUser &&
-                !isAppointmentPast(live?.date, live?.hour)
-              ) {
-                tx.delete(slotRefs[i]);
-              }
-            }
+        tx.update(reqRef, {
+          status: "rejected",
+          decidedAt: serverTimestamp(),
+          decidedBy: auth.currentUser?.uid || null,
+        });
 
-            // מנקים userReservations אם הוא מצביע על התור הזה
-            if (userResRef && userResSnap && userResSnap.exists()) {
-              const ur = userResSnap.data();
+        for (let i = 0; i < slotSnaps.length; i++) {
+          const snap = slotSnaps[i];
+          if (!snap.exists()) continue;
 
-              const matches = groupId
-                ? ur?.groupId === groupId || ur?.appointmentId === groupId
-                : ur?.appointmentId === docId;
+          const live = snap.data();
+          const sameGroup = (live?.groupId || groupId) === groupId;
 
-              if (matches) {
-                tx.set(
-                  userResRef,
-                  {
-                    status: "cancelled_by_owner",
-                    cancelledAt: serverTimestamp(),
-                    cancelledBy: auth.currentUser?.uid || null,
-                    appointmentId: null,
-                    date: null,
-                    hour: null,
-                    groupId: null,
-                    slots: [],
-                    cancelledAlertShown: false, // כדי שהלקוחה תקבל פעם אחת הודעת ביטול
-                  },
-                  { merge: true }
-                );
-              }
-            }
-          });
+          if (live?.status === "pending" && sameGroup) {
+            tx.delete(slotRefs[i]);
+          }
+        }
 
-          // ===============================
-          // שליחת מייל "התור בוטל" (רק Web)
-          // ===============================
-          try {
-            if (Platform.OS === "web") {
-              const u = userId ? usersMap?.[userId] : null;
+        if (ur.exists()) {
+          tx.set(
+            userResRef,
+            {
+              status: "rejected",
+              rejectedAt: serverTimestamp(),
+              appointmentId: null,
+              date: null,
+              hour: null,
+              groupId: null,
+              slots: [],
+            },
+            { merge: true }
+          );
+        }
+      });
 
-              const toEmail = app?.userEmail || u?.email || "";
+      try {
+        if (Platform.OS === "web") {
+          const toEmail =
+            req.userEmail || usersMap?.[req.userId]?.email || "";
 
-              const clientName =
-                u?.displayName ||
-                `${u?.firstName || ""} ${u?.lastName || ""}`.trim() ||
-                app?.customerName ||
-                "לקוחה";
+          const clientName =
+            usersMap?.[req.userId]?.displayName ||
+            `${usersMap?.[req.userId]?.firstName || ""} ${
+              usersMap?.[req.userId]?.lastName || ""
+            }`.trim() ||
+            "לקוחה";
 
-              if (toEmail) {
-                await sendAppointmentCancelledEmail({
-                  toEmail,
-                  clientName,
-                  date,
-                  time: hour,
-                  businessName: "Rotem Studio Nails",
-                  servicesSelected: app?.servicesSelected || [],
-                });
-              } else {
-                console.log(
-                  "⚠️ אין אימייל ללקוחה – לא נשלח מייל ביטול"
-                );
-              }
-            } else {
-              console.log("📧 דילוג על EmailJS – לא Web (iOS/Android)");
-            }
-          } catch (mailErr) {
+          if (toEmail) {
+            await sendAppointmentRejectedEmail({
+              toEmail,
+              clientName,
+              date: req.date,
+              time: req.hour,
+              businessName: "Rotem Studio Nails",
+              servicesSelected: req.servicesSelected || [],
+            });
+          } else {
             console.log(
-              "❌ sendAppointmentCancelledEmail error:",
-              mailErr
+              "⚠️ אין אימייל ללקוחה – לא נשלח מייל דחייה"
             );
           }
-
-          showAlert("בוצע", "התור בוטל בהצלחה");
-
-          // ✅ אחרי ביטול תור מאושר – מעבירים HOLD לבאה בתור ברשימת המתנה
-          await ensureHoldIfNeeded(date, hour);
-        } catch (e) {
-          showAlert("שגיאה", e?.message || "לא הצליח לבטל תור");
+        } else {
+          console.log("📧 דילוג על EmailJS – לא Web (iOS/Android)");
         }
-      },
-    },
-  ]);
-}
+      } catch (mailErr) {
+        console.log(
+          "❌ sendAppointmentRejectedEmail error:",
+          mailErr
+        );
+      }
 
+      showAlert("נדחה", "הבקשה נדחתה");
 
-  // ✅ מחיקת תור שכבר עבר (ללא שליחת מייל, רק ניקוי מהמערכת)
-async function ownerDeletePastAppointment(app) {
-  const { docId, userId, date, hour } = app;
-
-  // ביטחון – אם בטעות ייקרא על תור עתידי
-  if (!isAppointmentPast(date, hour)) {
-    showAlert("שגיאה", "התור עדיין לא עבר – אפשר לבטל במקום למחוק.");
-    return;
+      await ensureHoldIfNeeded(req.date, req.hour);
+    } catch (e) {
+      showAlert("שגיאה", e?.message || "לא הצליח לדחות בקשה");
+    }
   }
 
-  const groupId = app.groupId || null;
-  const slots = Array.isArray(app.slots) && app.slots.length ? app.slots : [hour];
+  async function ownerCancelAppointment(app) {
+    const { docId, userId, date, hour } = app;
 
-  showAlert(
-    "מחיקת תור שעבר",
-    `למחוק לצמיתות את התור של ${hour} בתאריך ${date}?`,
-    [
+    if (isAppointmentPast(date, hour)) {
+      showAlert(
+        "לא ניתן לבטל",
+        "התור כבר עבר ולכן אי אפשר לבטל אותו."
+      );
+      return;
+    }
+
+    const groupId = app.groupId || null;
+    const slots =
+      Array.isArray(app.slots) && app.slots.length ? app.slots : [hour];
+
+    showAlert("ביטול תור", `לבטל את התור של ${hour} בתאריך ${date}?`, [
       { text: "לא", style: "cancel" },
       {
-        text: "כן, מחק",
+        text: "כן, לבטל",
         style: "destructive",
         onPress: async () => {
           try {
@@ -1510,7 +1442,6 @@ async function ownerDeletePastAppointment(app) {
               let userResSnap = null;
               if (userResRef) userResSnap = await tx.get(userResRef);
 
-              // מוחקים את כל הסלוטים של התור הזה
               const slotRefs = slots.map((h) =>
                 doc(db, "appointments", makeAppointmentDocId(date, h))
               );
@@ -1522,31 +1453,41 @@ async function ownerDeletePastAppointment(app) {
                 if (!snap.exists()) continue;
 
                 const live = snap.data();
-                const sameGroup = groupId ? live?.groupId === groupId : true;
+                const sameGroup = groupId
+                  ? live?.groupId === groupId
+                  : true;
                 const sameUser = userId ? live?.userId === userId : true;
 
-                if (sameGroup && sameUser) {
+                if (
+                  sameGroup &&
+                  sameUser &&
+                  !isAppointmentPast(live?.date, live?.hour)
+                ) {
                   tx.delete(slotRefs[i]);
                 }
               }
 
-              // מנקים גם את userReservations אם הוא עדיין מצביע על התור הזה
               if (userResRef && userResSnap && userResSnap.exists()) {
                 const ur = userResSnap.data();
+
                 const matches = groupId
-                  ? ur?.groupId === groupId || ur?.appointmentId === groupId
+                  ? ur?.groupId === groupId ||
+                    ur?.appointmentId === groupId
                   : ur?.appointmentId === docId;
 
                 if (matches) {
                   tx.set(
                     userResRef,
                     {
-                      status: "finished_deleted",
+                      status: "cancelled_by_owner",
+                      cancelledAt: serverTimestamp(),
+                      cancelledBy: auth.currentUser?.uid || null,
                       appointmentId: null,
                       date: null,
                       hour: null,
                       groupId: null,
                       slots: [],
+                      cancelledAlertShown: false,
                     },
                     { merge: true }
                   );
@@ -1554,18 +1495,145 @@ async function ownerDeletePastAppointment(app) {
               }
             });
 
-            showAlert("נמחק", "התור שסומן כ׳עבר׳ נמחק מהמערכת.");
+            try {
+              if (Platform.OS === "web") {
+                const u = userId ? usersMap?.[userId] : null;
+
+                const toEmail = app?.userEmail || u?.email || "";
+
+                const clientName =
+                  u?.displayName ||
+                  `${u?.firstName || ""} ${
+                    u?.lastName || ""
+                  }`.trim() ||
+                  app?.customerName ||
+                  "לקוחה";
+
+                if (toEmail) {
+                  await sendAppointmentCancelledEmail({
+                    toEmail,
+                    clientName,
+                    date,
+                    time: hour,
+                    businessName: "Rotem Studio Nails",
+                    servicesSelected: app?.servicesSelected || [],
+                  });
+                } else {
+                  console.log(
+                    "⚠️ אין אימייל ללקוחה – לא נשלח מייל ביטול"
+                  );
+                }
+              } else {
+                console.log(
+                  "📧 דילוג על EmailJS – לא Web (iOS/Android)"
+                );
+              }
+            } catch (mailErr) {
+              console.log(
+                "❌ sendAppointmentCancelledEmail error:",
+                mailErr
+              );
+            }
+
+            showAlert("בוצע", "התור בוטל בהצלחה");
+
+            await ensureHoldIfNeeded(date, hour);
           } catch (e) {
-            showAlert("שגיאה", e?.message || "לא הצליח למחוק תור");
+            showAlert("שגיאה", e?.message || "לא הצליח לבטל תור");
           }
         },
       },
-    ]
-  );
-}
+    ]);
+  }
 
+  async function ownerDeletePastAppointment(app) {
+    const { docId, userId, date, hour } = app;
 
-  // ✅ שריון ידני: מאושר מיד
+    if (!isAppointmentPast(date, hour)) {
+      showAlert(
+        "שגיאה",
+        "התור עדיין לא עבר – אפשר לבטל במקום למחוק."
+      );
+      return;
+    }
+
+    const groupId = app.groupId || null;
+    const slots =
+      Array.isArray(app.slots) && app.slots.length ? app.slots : [hour];
+
+    showAlert(
+      "מחיקת תור שעבר",
+      `למחוק לצמיתות את התור של ${hour} בתאריך ${date}?`,
+      [
+        { text: "לא", style: "cancel" },
+        {
+          text: "כן, מחק",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const userResRef = userId
+                ? doc(db, "userReservations", userId)
+                : null;
+
+              await runTransaction(db, async (tx) => {
+                let userResSnap = null;
+                if (userResRef) userResSnap = await tx.get(userResRef);
+
+                const slotRefs = slots.map((h) =>
+                  doc(db, "appointments", makeAppointmentDocId(date, h))
+                );
+                const slotSnaps = [];
+                for (const r of slotRefs) slotSnaps.push(await tx.get(r));
+
+                for (let i = 0; i < slotSnaps.length; i++) {
+                  const snap = slotSnaps[i];
+                  if (!snap.exists()) continue;
+
+                  const live = snap.data();
+                  const sameGroup = groupId
+                    ? live?.groupId === groupId
+                    : true;
+                  const sameUser = userId ? live?.userId === userId : true;
+
+                  if (sameGroup && sameUser) {
+                    tx.delete(slotRefs[i]);
+                  }
+                }
+
+                if (userResRef && userResSnap && userResSnap.exists()) {
+                  const ur = userResSnap.data();
+                  const matches = groupId
+                    ? ur?.groupId === groupId ||
+                      ur?.appointmentId === groupId
+                    : ur?.appointmentId === docId;
+
+                  if (matches) {
+                    tx.set(
+                      userResRef,
+                      {
+                        status: "finished_deleted",
+                        appointmentId: null,
+                        date: null,
+                        hour: null,
+                        groupId: null,
+                        slots: [],
+                      },
+                      { merge: true }
+                    );
+                  }
+                }
+              });
+
+              showAlert("נמחק", "התור שסומן כ׳עבר׳ נמחק מהמערכת.");
+            } catch (e) {
+              showAlert("שגיאה", e?.message || "לא הצליח למחוק תור");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   async function ownerCreateManualAppointment() {
     const hour = normalizeHour(manualHour);
     const name = manualName.trim();
@@ -1581,7 +1649,10 @@ async function ownerDeletePastAppointment(app) {
       return;
     }
 
-    if (hoursForSelectedDate.length > 0 && !hoursForSelectedDate.includes(hour)) {
+    if (
+      hoursForSelectedDate.length > 0 &&
+      !hoursForSelectedDate.includes(hour)
+    ) {
       showAlert("שגיאה", "השעה הזו לא מוגדרת כזמינה בתאריך הזה");
       return;
     }
@@ -1592,7 +1663,8 @@ async function ownerDeletePastAppointment(app) {
     try {
       await runTransaction(db, async (tx) => {
         const existing = await tx.get(appointmentRef);
-        if (existing.exists()) throw new Error("התור בשעה הזו כבר תפוס");
+        if (existing.exists())
+          throw new Error("התור בשעה הזו כבר תפוס");
 
         tx.set(appointmentRef, {
           date: selectedDate,
@@ -1644,74 +1716,75 @@ async function ownerDeletePastAppointment(app) {
         Platform.OS === "web" ? { cursor: "pointer" } : null,
       ]}
     >
-      <Text style={{ fontWeight: "900", color: danger ? "#D6455D" : colors.textDark }}>{text}</Text>
+      <Text
+        style={{
+          fontWeight: "900",
+          color: danger ? "#D6455D" : colors.textDark,
+        }}
+      >
+        {text}
+      </Text>
     </Pressable>
   );
 
-    // ✅ איחוד של ימים עסוקים מתורים + בקשות
-const markedDates = useMemo(() => {
-  const out = {};
+  const markedDates = useMemo(() => {
+    const out = {};
 
-  // כל התאריכים שיש בהם או תור מאושר או בקשה ממתינה
-  const allDates = new Set([
-    ...Object.keys(busyFromApps || {}),
-    ...Object.keys(busyFromReqs || {}),
-  ]);
+    const allDates = new Set([
+      ...Object.keys(busyFromApps || {}),
+      ...Object.keys(busyFromReqs || {}),
+    ]);
 
-  allDates.forEach((d) => {
-    const hasApproved = !!busyFromApps?.[d];
-    const hasPending = !!busyFromReqs?.[d];
+    allDates.forEach((d) => {
+      const hasApproved = !!busyFromApps?.[d];
+      const hasPending = !!busyFromReqs?.[d];
 
-    if (!hasApproved && !hasPending) return;
+      if (!hasApproved && !hasPending) return;
 
-    const dots = [];
+      const dots = [];
 
-    if (hasApproved) {
-      dots.push({
-        key: "approved",
-        color: "#4CAF50", // 💚 ירוק – תור מאושר
-      });
+      if (hasApproved) {
+        dots.push({
+          key: "approved",
+          color: "#4CAF50",
+        });
+      }
+
+      if (hasPending) {
+        dots.push({
+          key: "pending",
+          color: "#ff9800",
+        });
+      }
+
+      out[d] = {
+        ...(out[d] || {}),
+        dots,
+        marked: true,
+      };
+    });
+
+    const hasApprovedToday = !!busyFromApps?.[selectedDate];
+    const hasPendingToday = !!busyFromReqs?.[selectedDate];
+
+    const dotsToday = [];
+    if (hasApprovedToday) {
+      dotsToday.push({ key: "approved", color: "#4CAF50" });
+    }
+    if (hasPendingToday) {
+      dotsToday.push({ key: "pending", color: "#ff9800" });
     }
 
-    if (hasPending) {
-      dots.push({
-        key: "pending",
-        color: "#ff9800", // כתום – בקשה ממתינה
-      });
-    }
-
-    out[d] = {
-      ...(out[d] || {}),
-      dots,
-      marked: true,
+    out[selectedDate] = {
+      ...(out[selectedDate] || {}),
+      selected: true,
+      selectedColor: colors.primary,
+      marked: hasApprovedToday || hasPendingToday,
+      ...(dotsToday.length ? { dots: dotsToday } : {}),
     };
-  });
 
-  // טיפול בתאריך הנבחר
-  const hasApprovedToday = !!busyFromApps?.[selectedDate];
-  const hasPendingToday = !!busyFromReqs?.[selectedDate];
-
-  const dotsToday = [];
-  if (hasApprovedToday) {
-    dotsToday.push({ key: "approved", color: "#4CAF50" }); // 💚 ירוק
-  }
-  if (hasPendingToday) {
-    dotsToday.push({ key: "pending", color: "#ff9800" });
-  }
-
-  out[selectedDate] = {
-    ...(out[selectedDate] || {}),
-    selected: true,
-    selectedColor: colors.primary, // הצבע של היום הנבחר נשאר סגול
-    marked: hasApprovedToday || hasPendingToday,
-    ...(dotsToday.length ? { dots: dotsToday } : {}),
-  };
-
-  return out;
-}, [busyFromApps, busyFromReqs, selectedDate]);
-
-
-
+    return out;
+  }, [busyFromApps, busyFromReqs, selectedDate]);
 
   // --------- מסך "לקוחות פעילים" ---------
   if (showUsers) {
@@ -1722,7 +1795,6 @@ const markedDates = useMemo(() => {
           { backgroundColor: "transparent", paddingBottom: 16 },
         ]}
       >
-        {/* תוכן המסך (כותרת, חיפוש, רשימת לקוחות) */}
         <View style={{ flex: 1 }}>
           <View
             style={{
@@ -1787,95 +1859,92 @@ const markedDates = useMemo(() => {
                 אין לקוחות להצגה
               </Text>
             ) : (
-filteredUsers.map((u) => {
-  const fullName =
-    `${u.firstName || ""} ${u.lastName || ""}`.trim() ||
-    u.displayName ||
-    "ללא שם";
+              filteredUsers.map((u) => {
+                const fullName =
+                  `${u.firstName || ""} ${u.lastName || ""}`.trim() ||
+                  u.displayName ||
+                  "ללא שם";
 
-// ✅ האם הלקוחה אישרה את התקנון המעודכן (הנוכחי)
-const accepted = !!u.termsAccepted;
-const acceptedVersion = u.termsAcceptedVersion || 0;
+                const accepted = !!u.termsAccepted;
+                const acceptedVersion = u.termsAcceptedVersion || 0;
 
-// מאושר רק אם אישרה וגם הגרסה שאישרה = הגרסה הנוכחית
-const acceptedLatest =
-  accepted && termsVersion > 0 && acceptedVersion === termsVersion;
+                const acceptedLatest =
+                  accepted &&
+                  termsVersion > 0 &&
+                  acceptedVersion === termsVersion;
 
-const termsLabel = acceptedLatest ? "✔ תקנון מאושר" : "✖ טרם אושר";
-const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
+                const termsLabel = acceptedLatest
+                  ? "✔ תקנון מאושר"
+                  : "✖ טרם אושר";
+                const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
 
+                return (
+                  <View
+                    key={u.uid}
+                    style={{
+                      backgroundColor: "#fff",
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      padding: 12,
+                      marginBottom: 10,
+                      alignItems: "flex-end",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: responsiveFont(16),
+                        fontWeight: "900",
+                        color: colors.textDark,
+                        textAlign: "right",
+                        width: "100%",
+                      }}
+                    >
+                      {fullName}
+                    </Text>
 
-  return (
-    <View
-      key={u.uid}
-      style={{
-        backgroundColor: "#fff",
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: colors.border,
-        padding: 12,
-        marginBottom: 10,
-        alignItems: "flex-end",
-      }}
-    >
-      <Text
-        style={{
-          fontSize: responsiveFont(16),
-          fontWeight: "900",
-          color: colors.textDark,
-          textAlign: "right",
-          width: "100%",
-        }}
-      >
-        {fullName}
-      </Text>
+                    <Text
+                      style={{
+                        marginTop: 4,
+                        color: colors.textDark,
+                        textAlign: "right",
+                        writingDirection: "ltr",
+                        width: "100%",
+                      }}
+                    >
+                      {u.email || "—"} :אימייל
+                    </Text>
 
-      <Text
-        style={{
-          marginTop: 4,
-          color: colors.textDark,
-          textAlign: "right",
-          writingDirection: "ltr",
-          width: "100%",
-        }}
-      >
-        {u.email || "—"} :אימייל
-      </Text>
+                    <Text
+                      style={{
+                        marginTop: 2,
+                        color: colors.textDark,
+                        textAlign: "right",
+                        writingDirection: "ltr",
+                        width: "100%",
+                      }}
+                    >
+                      {u.phone || "—"} :טלפון
+                    </Text>
 
-      <Text
-        style={{
-          marginTop: 2,
-          color: colors.textDark,
-          textAlign: "right",
-          writingDirection: "ltr",
-          width: "100%",
-        }}
-      >
-        {u.phone || "—"} :טלפון
-      </Text>
-
-      {/* ✅ סטטוס תקנון לפי גרסה */}
-        <Text
-          style={{
-            marginTop: 6,
-            textAlign: "right",
-            width: "100%",
-            fontWeight: "900",
-            color: termsColor,
-          }}
-        >
-          סטטוס תקנון: {termsLabel}
-        </Text>
-
-            </View>
-          );
-        })
-
-      )}
+                    <Text
+                      style={{
+                        marginTop: 6,
+                        textAlign: "right",
+                        width: "100%",
+                        fontWeight: "900",
+                        color: termsColor,
+                      }}
+                    >
+                      סטטוס תקנון: {termsLabel}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
           </ScrollView>
         </View>
 
-        {/* ✅ כפתור חזרה תמיד בתחתית, סגול סטנדרטי */}
         <Pressable
           onPress={() => {
             Keyboard.dismiss();
@@ -1910,30 +1979,79 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
     );
   }
 
-
   // --------- מסך ראשי ---------
   return (
-    <View style={[globalStyles.container, { backgroundColor: "transparent" }]}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 28, flexGrow: 1 }}>
+    <View
+      style={[globalStyles.container, { backgroundColor: "transparent" }]}
+    >
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 28, flexGrow: 1 }}
+      >
         {/* Header */}
-        <View style={{ paddingVertical: 12, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <View
+          style={{
+            paddingVertical: 12,
+            marginBottom: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+          }}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+            }}
+          >
             <View style={{ width: 46 }} />
 
             <View style={{ flex: 1, paddingHorizontal: 10 }}>
-              <Text style={{ fontSize: responsiveFont(24), fontWeight: "900", textAlign: "center", color: colors.primary }}>
+              <Text
+                style={{
+                  fontSize: responsiveFont(24),
+                  fontWeight: "900",
+                  textAlign: "center",
+                  color: colors.primary,
+                }}
+              >
                 מסך בעלת העסק
               </Text>
 
-              <Text style={{ marginTop: 6, fontSize: responsiveFont(15), textAlign: "center", color: colors.textDark, fontWeight: "700" }}>
+              <Text
+                style={{
+                  marginTop: 6,
+                  fontSize: responsiveFont(15),
+                  textAlign: "center",
+                  color: colors.textDark,
+                  fontWeight: "700",
+                }}
+              >
                 תאריך נבחר: {selectedDate}
               </Text>
 
-              <Text style={{ marginTop: 6, fontSize: responsiveFont(13), textAlign: "center", color: "#444", fontWeight: "700" }}>
-                שעות לתאריך: {hoursForSelectedDate.length} {availabilityExists ? "(מיוחד)" : "(ברירת מחדל)"}
+              <Text
+                style={{
+                  marginTop: 6,
+                  fontSize: responsiveFont(13),
+                  textAlign: "center",
+                  color: "#444",
+                  fontWeight: "700",
+                }}
+              >
+                שעות לתאריך: {hoursForSelectedDate.length}{" "}
+                {availabilityExists ? "(מיוחד)" : "(ברירת מחדל)"}
               </Text>
 
-              <Text style={{ marginTop: 6, fontSize: responsiveFont(13), textAlign: "center", color: "#F5A623", fontWeight: "900" }}>
+              <Text
+                style={{
+                  marginTop: 6,
+                  fontSize: responsiveFont(13),
+                  textAlign: "center",
+                  color: "#F5A623",
+                  fontWeight: "900",
+                }}
+              >
                 בקשות ממתינות: {requests.length}
               </Text>
             </View>
@@ -1956,17 +2074,52 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                 Platform.OS === "web" ? { cursor: "pointer" } : null,
               ]}
             >
-              <View style={{ width: 18, height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
-              <View style={{ width: 18, height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
-              <View style={{ width: 18, height: 2, backgroundColor: colors.primary, marginVertical: 2, borderRadius: 2 }} />
+              <View
+                style={{
+                  width: 18,
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
+              <View
+                style={{
+                  width: 18,
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
+              <View
+                style={{
+                  width: 18,
+                  height: 2,
+                  backgroundColor: colors.primary,
+                  marginVertical: 2,
+                  borderRadius: 2,
+                }}
+              />
             </Pressable>
           </View>
         </View>
 
         {/* Menu */}
-        <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Modal
+          visible={menuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuOpen(false)}
+        >
           <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18 }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+              }}
+            >
               <TouchableWithoutFeedback onPress={() => {}}>
                 <View
                   style={{
@@ -1980,7 +2133,14 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     padding: 14,
                   }}
                 >
-                  <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(16), textAlign: "center" }}>
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: responsiveFont(16),
+                      textAlign: "center",
+                    }}
+                  >
                     תפריט
                   </Text>
                   <MenuItem
@@ -2016,7 +2176,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     }}
                   />
 
-                 {/* ✅ כפתור עריכת טיפולים (שמות + זמנים) */}
                   <MenuItem
                     text="עריכת טיפולים"
                     onPress={() => {
@@ -2026,7 +2185,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     }}
                   />
 
-                  {/* ✅ כפתור מעבר למסך דף העסק */}
                   <MenuItem
                     text="עריכת דף העסק"
                     onPress={() => {
@@ -2045,7 +2203,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     }}
                   />
 
-                   {/* ✅ שינוי תמונות רקע של האפליקציה */}
                   <MenuItem
                     text="שינוי תמונות רקע"
                     onPress={() => {
@@ -2063,7 +2220,10 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                       confirmLogout();
                     }}
                   />
-                  <MenuItem text="סגור" onPress={() => setMenuOpen(false)} />
+                  <MenuItem
+                    text="סגור"
+                    onPress={() => setMenuOpen(false)}
+                  />
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -2071,17 +2231,50 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
         </Modal>
 
         {/* Modal: ברירת מחדל */}
-
-        <Modal visible={defaultModalOpen} transparent animationType="slide" onRequestClose={() => setDefaultModalOpen(false)}>
+        <Modal
+          visible={defaultModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setDefaultModalOpen(false)}
+        >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18, justifyContent: "center" }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+                justifyContent: "center",
+              }}
+            >
               <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={{ backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14 }}>
-                  <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(18), textAlign: "center" }}>
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: responsiveFont(18),
+                      textAlign: "center",
+                    }}
+                  >
                     ברירת מחדל לכל הימים
                   </Text>
 
-                  <Text style={{ marginTop: 8, color: "#444", textAlign: "right", fontWeight: "700" }}>
+                  <Text
+                    style={{
+                      marginTop: 8,
+                      color: "#444",
+                      textAlign: "right",
+                      fontWeight: "700",
+                    }}
+                  >
                     הזיני שעה בכל שורה:
                     {"\n"}15:00{"\n"}16:00{"\n"}17:00{"\n"}18:00{"\n"}19:00
                   </Text>
@@ -2092,27 +2285,62 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     placeholder="15:00"
                     placeholderTextColor="#777"
                     multiline
-                    style={[globalStyles.input, { marginTop: 10, minHeight: 140, textAlign: "left", writingDirection: "ltr", paddingTop: 12 }]}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 10,
+                        minHeight: 140,
+                        textAlign: "left",
+                        writingDirection: "ltr",
+                        paddingTop: 12,
+                      },
+                    ]}
                   />
 
                   <Pressable
                     onPress={saveDefaultHours}
                     style={({ pressed }) => [
-                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: colors.primary,
+                        paddingVertical: 12,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 12,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>שמור ברירת מחדל</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      שמור ברירת מחדל
+                    </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => setDefaultModalOpen(false)}
                     style={({ pressed }) => [
-                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: "#444",
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 10,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      סגור
+                    </Text>
                   </Pressable>
                 </View>
               </TouchableWithoutFeedback>
@@ -2121,16 +2349,50 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
         </Modal>
 
         {/* Modal: שעות לתאריך */}
-        <Modal visible={availabilityModalOpen} transparent animationType="slide" onRequestClose={() => setAvailabilityModalOpen(false)}>
+        <Modal
+          visible={availabilityModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setAvailabilityModalOpen(false)}
+        >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18, justifyContent: "center" }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+                justifyContent: "center",
+              }}
+            >
               <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={{ backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14 }}>
-                  <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(18), textAlign: "center" }}>
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: responsiveFont(18),
+                      textAlign: "center",
+                    }}
+                  >
                     שעות לתאריך {selectedDate}
                   </Text>
 
-                  <Text style={{ marginTop: 8, color: "#444", textAlign: "right", fontWeight: "700" }}>
+                  <Text
+                    style={{
+                      marginTop: 8,
+                      color: "#444",
+                      textAlign: "right",
+                      fontWeight: "700",
+                    }}
+                  >
                     אם תשמרי ריק — אין שעות באותו יום (override).
                   </Text>
 
@@ -2140,46 +2402,110 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     placeholder="15:00"
                     placeholderTextColor="#777"
                     multiline
-                    style={[globalStyles.input, { marginTop: 10, minHeight: 140, textAlign: "left", writingDirection: "ltr", paddingTop: 12 }]}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 10,
+                        minHeight: 140,
+                        textAlign: "left",
+                        writingDirection: "ltr",
+                        paddingTop: 12,
+                      },
+                    ]}
                   />
 
                   <Pressable
                     onPress={saveAvailabilityForDate}
                     style={({ pressed }) => [
-                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: colors.primary,
+                        paddingVertical: 12,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 12,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>שמור שעות לתאריך</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      שמור שעות לתאריך
+                    </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => {
                       if (!availabilityExists) {
-                        showAlert("אין מה לאפס", "אין שעות מיוחדות לתאריך הזה.");
+                        showAlert(
+                          "אין מה לאפס",
+                          "אין שעות מיוחדות לתאריך הזה."
+                        );
                         return;
                       }
-                      showAlert("איפוס תאריך", "למחוק את השעות המיוחדות ולחזור לברירת המחדל?", [
-                        { text: "ביטול", style: "cancel" },
-                        { text: "אפס", style: "destructive", onPress: resetAvailabilityForDate },
-                      ]);
+                      showAlert(
+                        "איפוס תאריך",
+                        "למחוק את השעות המיוחדות ולחזור לברירת המחדל?",
+                        [
+                          { text: "ביטול", style: "cancel" },
+                          {
+                            text: "אפס",
+                            style: "destructive",
+                            onPress: resetAvailabilityForDate,
+                          },
+                        ]
+                      );
                     }}
                     style={({ pressed }) => [
-                      { backgroundColor: "#fff", borderWidth: 1, borderColor: "#D6455D", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: "#fff",
+                        borderWidth: 1,
+                        borderColor: "#D6455D",
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 10,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "#D6455D", fontWeight: "900" }}>איפוס תאריך לברירת מחדל</Text>
+                    <Text
+                      style={{
+                        color: "#D6455D",
+                        fontWeight: "900",
+                      }}
+                    >
+                      איפוס תאריך לברירת מחדל
+                    </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => setAvailabilityModalOpen(false)}
                     style={({ pressed }) => [
-                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: "#444",
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 10,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      סגור
+                    </Text>
                   </Pressable>
                 </View>
               </TouchableWithoutFeedback>
@@ -2187,7 +2513,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           </TouchableWithoutFeedback>
         </Modal>
 
-                {/* Modal: עריכת טיפולים (שמות + זמן בדקות) */}
+        {/* Modal: עריכת טיפולים */}
         <Modal
           visible={servicesModalOpen}
           transparent
@@ -2289,7 +2615,10 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                           onChangeText={(text) =>
                             setServices((prev) => {
                               const copy = [...prev];
-                              copy[idx] = { ...copy[idx], durationMin: text };
+                              copy[idx] = {
+                                ...copy[idx],
+                                durationMin: text,
+                              };
                               return copy;
                             })
                           }
@@ -2308,7 +2637,9 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
 
                         <Pressable
                           onPress={() =>
-                            setServices((prev) => prev.filter((_, i) => i !== idx))
+                            setServices((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            )
                           }
                           style={({ pressed }) => [
                             {
@@ -2321,10 +2652,17 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                               borderColor: "#D6455D",
                               opacity: pressed ? 0.85 : 1,
                             },
-                            Platform.OS === "web" ? { cursor: "pointer" } : null,
+                            Platform.OS === "web"
+                              ? { cursor: "pointer" }
+                              : null,
                           ]}
                         >
-                          <Text style={{ color: "#D6455D", fontWeight: "900" }}>
+                          <Text
+                            style={{
+                              color: "#D6455D",
+                              fontWeight: "900",
+                            }}
+                          >
                             מחיקת טיפול
                           </Text>
                         </Pressable>
@@ -2336,7 +2674,11 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     onPress={() =>
                       setServices((prev) => [
                         ...prev,
-                        { id: `service_${prev.length + 1}`, name: "", durationMin: "" },
+                        {
+                          id: `service_${prev.length + 1}`,
+                          name: "",
+                          durationMin: "",
+                        },
                       ])
                     }
                     style={({ pressed }) => [
@@ -2350,7 +2692,9 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                         marginTop: 8,
                         opacity: pressed ? 0.88 : 1,
                       },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
                     <Text
@@ -2374,17 +2718,20 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                         marginTop: 12,
                         opacity: pressed ? 0.88 : 1,
                       },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
                       שמור טיפולים
                     </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => {
-                      // מחזיר למצב האחרון שנשמר
                       setServices(servicesInitial);
                       setServicesModalOpen(false);
                     }}
@@ -2397,12 +2744,17 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                         marginTop: 10,
                         opacity: pressed ? 0.88 : 1,
                       },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      סגור
+                    </Text>
                   </Pressable>
-
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -2417,14 +2769,43 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           onRequestClose={() => setTermsModalOpen(false)}
         >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18, justifyContent: "center" }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+                justifyContent: "center",
+              }}
+            >
               <TouchableWithoutFeedback>
-                <View style={{ backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14, maxHeight: "80%" }}>
-                  <Text style={{ fontWeight: "900", color: colors.primary, fontSize: 18, textAlign: "center" }}>
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                    maxHeight: "80%",
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: 18,
+                      textAlign: "center",
+                    }}
+                  >
                     עריכת תקנון
                   </Text>
 
-                  <Text style={{ textAlign: "center", fontSize: 12, color: "#777" }}>
+                  <Text
+                    style={{
+                      textAlign: "center",
+                      fontSize: 12,
+                      color: "#777",
+                    }}
+                  >
                     גרסה נוכחית: {termsVersion}
                   </Text>
 
@@ -2433,16 +2814,50 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                       value={termsText}
                       onChangeText={setTermsText}
                       multiline
-                      style={[globalStyles.input, { minHeight: 220, textAlign: "right", writingDirection: "rtl", paddingTop: 12 }]}
+                      style={[
+                        globalStyles.input,
+                        {
+                          minHeight: 220,
+                          textAlign: "right",
+                          writingDirection: "rtl",
+                          paddingTop: 12,
+                        },
+                      ]}
                     />
                   </ScrollView>
 
-                  <Pressable onPress={saveTerms} style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12 }}>
-                    <Text style={{ color: "white", fontWeight: "900" }}>שמור תקנון</Text>
+                  <Pressable
+                    onPress={saveTerms}
+                    style={{
+                      backgroundColor: colors.primary,
+                      paddingVertical: 12,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      marginTop: 12,
+                    }}
+                  >
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      שמור תקנון
+                    </Text>
                   </Pressable>
 
-                  <Pressable onPress={() => setTermsModalOpen(false)} style={{ backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10 }}>
-                    <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
+                  <Pressable
+                    onPress={() => setTermsModalOpen(false)}
+                    style={{
+                      backgroundColor: "#444",
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      alignItems: "center",
+                      marginTop: 10,
+                    }}
+                  >
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      סגור
+                    </Text>
                   </Pressable>
                 </View>
               </TouchableWithoutFeedback>
@@ -2450,7 +2865,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           </TouchableWithoutFeedback>
         </Modal>
 
-         {/* Modal: שינוי תמונות רקע – רק מהגלריה, בלי קישורים */}
+        {/* Modal: שינוי תמונות רקע */}
         <Modal
           visible={backgroundsModalOpen}
           transparent
@@ -2492,7 +2907,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     style={{ marginTop: 10, maxHeight: 260 }}
                     keyboardShouldPersistTaps="handled"
                   >
-                    {/* רקע מסך פתיחת המערכת */}
                     <Text
                       style={{
                         textAlign: "right",
@@ -2519,7 +2933,9 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                           borderRadius: 999,
                           opacity: pressed ? 0.88 : 1,
                         },
-                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                        Platform.OS === "web"
+                          ? { cursor: "pointer" }
+                          : null,
                       ]}
                     >
                       <Text
@@ -2532,7 +2948,6 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                       </Text>
                     </Pressable>
 
-                    {/* רקע כל האפליקציה */}
                     <Text
                       style={{
                         textAlign: "right",
@@ -2559,7 +2974,9 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                           borderRadius: 999,
                           opacity: pressed ? 0.88 : 1,
                         },
-                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                        Platform.OS === "web"
+                          ? { cursor: "pointer" }
+                          : null,
                       ]}
                     >
                       <Text
@@ -2597,10 +3014,14 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                         marginTop: 10,
                         opacity: pressed ? 0.88 : 1,
                       },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
                       סגור
                     </Text>
                   </Pressable>
@@ -2611,12 +3032,39 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
         </Modal>
 
         {/* Modal: שריון ידני */}
-        <Modal visible={manualModalOpen} transparent animationType="slide" onRequestClose={() => setManualModalOpen(false)}>
+        <Modal
+          visible={manualModalOpen}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setManualModalOpen(false)}
+        >
           <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.35)", padding: 18, justifyContent: "center" }}>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.35)",
+                padding: 18,
+                justifyContent: "center",
+              }}
+            >
               <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={{ backgroundColor: "#fff", borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14 }}>
-                  <Text style={{ fontWeight: "900", color: colors.primary, fontSize: responsiveFont(18), textAlign: "center" }}>
+                <View
+                  style={{
+                    backgroundColor: "#fff",
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 14,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontWeight: "900",
+                      color: colors.primary,
+                      fontSize: responsiveFont(18),
+                      textAlign: "center",
+                    }}
+                  >
                     שריון ידני (מאושר)
                   </Text>
 
@@ -2625,7 +3073,14 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     onChangeText={setManualHour}
                     placeholder="שעה (לדוגמה 15:00)"
                     placeholderTextColor="#777"
-                    style={[globalStyles.input, { marginTop: 10, textAlign: "right", writingDirection: "ltr" }]}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 10,
+                        textAlign: "right",
+                        writingDirection: "ltr",
+                      },
+                    ]}
                   />
 
                   <TextInput
@@ -2633,7 +3088,14 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     onChangeText={setManualName}
                     placeholder="שם לקוחה"
                     placeholderTextColor="#777"
-                    style={[globalStyles.input, { marginTop: 8, textAlign: "right", writingDirection: "rtl" }]}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 8,
+                        textAlign: "right",
+                        writingDirection: "rtl",
+                      },
+                    ]}
                   />
 
                   <TextInput
@@ -2646,8 +3108,17 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     onSubmitEditing={Keyboard.dismiss}
                     onFocus={() => setPhoneFocused(true)}
                     onBlur={() => setPhoneFocused(false)}
-                    {...(Platform.OS === "ios" ? { inputAccessoryViewID: phoneAccessoryId } : {})}
-                    style={[globalStyles.input, { marginTop: 8, textAlign: "right", writingDirection: "ltr" }]}
+                    {...(Platform.OS === "ios"
+                      ? { inputAccessoryViewID: phoneAccessoryId }
+                      : {})}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 8,
+                        textAlign: "right",
+                        writingDirection: "ltr",
+                      },
+                    ]}
                   />
 
                   <TextInput
@@ -2655,39 +3126,91 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     onChangeText={setManualService}
                     placeholder="סוג טיפול (אופציונלי)"
                     placeholderTextColor="#777"
-                    style={[globalStyles.input, { marginTop: 8, textAlign: "right", writingDirection: "rtl" }]}
+                    style={[
+                      globalStyles.input,
+                      {
+                        marginTop: 8,
+                        textAlign: "right",
+                        writingDirection: "rtl",
+                      },
+                    ]}
                   />
 
-                  {Platform.OS === "android" && phoneFocused && keyboardVisible ? (
+                  {Platform.OS === "android" &&
+                  phoneFocused &&
+                  keyboardVisible ? (
                     <Pressable
                       onPress={Keyboard.dismiss}
                       style={({ pressed }) => [
-                        { alignSelf: "flex-end", backgroundColor: colors.primary, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, marginTop: 10, opacity: pressed ? 0.88 : 1 },
-                        Platform.OS === "web" ? { cursor: "pointer" } : null,
+                        {
+                          alignSelf: "flex-end",
+                          backgroundColor: colors.primary,
+                          paddingVertical: 8,
+                          paddingHorizontal: 14,
+                          borderRadius: 999,
+                          marginTop: 10,
+                          opacity: pressed ? 0.88 : 1,
+                        },
+                        Platform.OS === "web"
+                          ? { cursor: "pointer" }
+                          : null,
                       ]}
                     >
-                      <Text style={{ color: "white", fontWeight: "900" }}>סיום</Text>
+                      <Text
+                        style={{
+                          color: "white",
+                          fontWeight: "900",
+                        }}
+                      >
+                        סיום
+                      </Text>
                     </Pressable>
                   ) : null}
 
                   <Pressable
                     onPress={ownerCreateManualAppointment}
                     style={({ pressed }) => [
-                      { backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10, alignItems: "center", marginTop: 12, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: colors.primary,
+                        paddingVertical: 12,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 12,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>שמור תור</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      שמור תור
+                    </Text>
                   </Pressable>
 
                   <Pressable
                     onPress={() => setManualModalOpen(false)}
                     style={({ pressed }) => [
-                      { backgroundColor: "#444", paddingVertical: 10, borderRadius: 10, alignItems: "center", marginTop: 10, opacity: pressed ? 0.88 : 1 },
-                      Platform.OS === "web" ? { cursor: "pointer" } : null,
+                      {
+                        backgroundColor: "#444",
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        alignItems: "center",
+                        marginTop: 10,
+                        opacity: pressed ? 0.88 : 1,
+                      },
+                      Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null,
                     ]}
                   >
-                    <Text style={{ color: "white", fontWeight: "900" }}>סגור</Text>
+                    <Text
+                      style={{ color: "white", fontWeight: "900" }}
+                    >
+                      סגור
+                    </Text>
                   </Pressable>
                 </View>
               </TouchableWithoutFeedback>
@@ -2695,12 +3218,31 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           </TouchableWithoutFeedback>
         </Modal>
 
-        {/* iOS accessory */}
         {Platform.OS === "ios" ? (
           <InputAccessoryView nativeID={phoneAccessoryId}>
-            <View style={{ backgroundColor: "#f2f2f2", borderTopWidth: 1, borderTopColor: "#ddd", paddingVertical: 8, paddingHorizontal: 12, alignItems: "flex-end" }}>
-              <Pressable onPress={Keyboard.dismiss} style={{ paddingVertical: 6, paddingHorizontal: 10 }}>
-                <Text style={{ color: colors.primary, fontWeight: "900", fontSize: 16 }}>סגירה</Text>
+            <View
+              style={{
+                backgroundColor: "#f2f2f2",
+                borderTopWidth: 1,
+                borderTopColor: "#ddd",
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                alignItems: "flex-end",
+              }}
+            >
+              <Pressable
+                onPress={Keyboard.dismiss}
+                style={{ paddingVertical: 6, paddingHorizontal: 10 }}
+              >
+                <Text
+                  style={{
+                    color: colors.primary,
+                    fontWeight: "900",
+                    fontSize: 16,
+                  }}
+                >
+                  סגירה
+                </Text>
               </Pressable>
             </View>
           </InputAccessoryView>
@@ -2740,26 +3282,24 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           }}
         />
 
-
-        {/* מקרא נקודות */}
+        {/* Legend */}
         <View
           style={{
             flexDirection: "row",
             justifyContent: "flex-end",
             alignItems: "center",
             marginBottom: 12,
-            gap: 20, // רווח בין סגול לכתום
+            gap: 20,
           }}
         >
-          {/* תור מאושר */}
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <View
               style={{
                 width: 10,
                 height: 10,
                 borderRadius: 5,
-                backgroundColor: "#4CAF50", // ירוק
-                marginRight: 12, // 👈 רווח אמיתי בין העיגול לטקסט
+                backgroundColor: "#4CAF50",
+                marginRight: 12,
               }}
             />
             <Text
@@ -2772,15 +3312,14 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
             </Text>
           </View>
 
-          {/* בקשה ממתינה */}
           <View style={{ flexDirection: "row", alignItems: "center" }}>
             <View
               style={{
                 width: 10,
                 height: 10,
                 borderRadius: 5,
-                backgroundColor: "#ff9800", // כתום
-                marginRight: 12, // 👈 גם כאן רווח בין העיגול לטקסט
+                backgroundColor: "#ff9800",
+                marginRight: 12,
               }}
             />
             <Text
@@ -2794,8 +3333,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           </View>
         </View>
 
-
-        {/* בקשות ממתינות */}
+        {/* Pending requests */}
         <View style={{ marginBottom: 14 }}>
           <Text
             style={{
@@ -2942,7 +3480,7 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
           )}
         </View>
 
-        {/* תורים מאושרים */}
+        {/* Approved appointments */}
         <View style={{ marginBottom: 8 }}>
           <Text
             style={{
@@ -2970,7 +3508,9 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
               const u = app.userId ? usersMap[app.userId] : null;
 
               const fullName = app.userId
-                ? `${u?.firstName || ""} ${u?.lastName || ""}`.trim()
+                ? `${u?.firstName || ""} ${
+                    u?.lastName || ""
+                  }`.trim()
                 : (app.customerName || "").trim();
 
               const phone = app.userId ? u?.phone : app.customerPhone;
@@ -3068,62 +3608,52 @@ const termsColor = acceptedLatest ? "#4CAF50" : "#d32f2f";
                     טלפון: {phone || "לא נטען"}
                   </Text>
 
-                    {isPast ? (
-                      <Text
-                        style={{
-                          marginTop: 6,
-                          fontSize: responsiveFont(14),
-                          color: "#4CAF50",
-                          fontWeight: "900",
-                          width: "100%",
-                          textAlign: "right",
-                        }}
-                      >
-                        ✅ התור עבר
-                      </Text>
-                    ) : null}
-
-                    <Pressable
-                      onPress={() => {
-                        if (isPast) {
-                          console.log(
-                            "🗑 ownerDeletePastAppointment click",
-                            app.date,
-                            app.hour
-                          );
-                          ownerDeletePastAppointment(app);
-                        } else {
-                          console.log(
-                            "🧨 ownerCancelAppointment click",
-                            app.date,
-                            app.hour
-                          );
-                          ownerCancelAppointment(app);
-                        }
-                      }}
+                  {isPast ? (
+                    <Text
                       style={{
-                        marginTop: 10,
-                        alignSelf: "flex-end",
-                        backgroundColor: "#c62828", // תמיד אדום – גם למחיקה וגם לביטול
-                        paddingVertical: 8,
-                        paddingHorizontal: 14,
-                        borderRadius: 8,
-                        opacity: 1,
-                        ...(Platform.OS === "web" ? { cursor: "pointer" } : null),
-                        zIndex: 10,
+                        marginTop: 6,
+                        fontSize: responsiveFont(14),
+                        color: "#4CAF50",
+                        fontWeight: "900",
+                        width: "100%",
+                        textAlign: "right",
                       }}
                     >
-                      <Text
-                        style={{
-                          color: "white",
-                          fontWeight: "800",
-                          textAlign: "right",
-                        }}
-                      >
-                        {isPast ? "מחק תור" : "בטל תור"}
-                      </Text>
-                    </Pressable>
+                      ✅ התור עבר
+                    </Text>
+                  ) : null}
 
+                  <Pressable
+                    onPress={() => {
+                      if (isPast) {
+                        ownerDeletePastAppointment(app);
+                      } else {
+                        ownerCancelAppointment(app);
+                      }
+                    }}
+                    style={{
+                      marginTop: 10,
+                      alignSelf: "flex-end",
+                      backgroundColor: "#c62828",
+                      paddingVertical: 8,
+                      paddingHorizontal: 14,
+                      borderRadius: 8,
+                      ...(Platform.OS === "web"
+                        ? { cursor: "pointer" }
+                        : null),
+                      zIndex: 10,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: "white",
+                        fontWeight: "800",
+                        textAlign: "right",
+                      }}
+                    >
+                      {isPast ? "מחק תור" : "בטל תור"}
+                    </Text>
+                  </Pressable>
                 </View>
               );
             })

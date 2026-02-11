@@ -36,7 +36,7 @@ export default function App() {
     <View style={{ flex: 1 }}>
       <NavigationContainer
         documentTitle={{
-          formatter: () => "Nails Rotem Studio",
+          formatter: () => "Rotem Nails Studio",
         }}
       >
         <AppNavigator />

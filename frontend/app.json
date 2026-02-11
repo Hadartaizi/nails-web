@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Nails Rotem Studio",
+    "name": "Rotem Nails Studio",
     "slug": "nails-rotem-studio",
 
     "icon": "./assets/appLogoApp.png",
@@ -13,7 +13,7 @@
     },
 
     "web": {
-      "name": "Nails Rotem Studio",
+      "name": "Rotem Nails Studio",
       "favicon": "./assets/appLogoApp.png",
       "icon": "./assets/appLogoApp.png"
     },

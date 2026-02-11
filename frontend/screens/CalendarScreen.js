@@ -63,6 +63,13 @@ function isReservationPassed(res) {
   return dt.getTime() < Date.now() - 60 * 1000; // דקה גרייס
 }
 
+// עוזר כללי לבדוק אם תאריך/שעה מסוימים כבר עברו
+function isDateHourPassed(dateStr, hourStr) {
+  const dt = toLocalDateTime(dateStr, hourStr);
+  if (!dt) return false;
+  return dt.getTime() < Date.now() - 60 * 1000;
+}
+
 // ---- helpers for month range ----
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -159,7 +166,8 @@ export default function CalendarScreen({ navigation }) {
   // ✅ גרסת תקנון מהשרת + מה שהמשתמש אישר
   const [termsVersion, setTermsVersion] = useState(1);
   const [userTermsAccepted, setUserTermsAccepted] = useState(false);
-  const [userTermsAcceptedVersion, setUserTermsAcceptedVersion] = useState(0);
+  const [userTermsAcceptedVersion, setUserTermsAcceptedVersion] =
+    useState(0);
 
   const [myRes, setMyRes] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -170,15 +178,15 @@ export default function CalendarScreen({ navigation }) {
   // ✅ התאריך שנבחר ביומן (לעיגול)
   const [selectedDate, setSelectedDate] = useState(today);
 
-  // ✅ ימים עם שעות מיוחדות (override)
-  const [overrideDaysMarked, setOverrideDaysMarked] = useState({});
-
   // ✅ נשמור את התור האחרון כדי לזהות כשנעלם
   const lastReservationRef = useRef(null);
   const deleteAlertShownRef = useRef(false);
 
   // ✅ רשימות המתנה שהמשתמש רשום אליהן
   const [myWaitlistEntries, setMyWaitlistEntries] = useState([]);
+
+  // ✅ כל התורים העתידיים שהלקוח שריין (pending/approved, רק השעה הראשונה של כל תור)
+  const [myFutureAppointments, setMyFutureAppointments] = useState([]);
 
   // ✅ auth listener
   useEffect(() => {
@@ -250,7 +258,9 @@ export default function CalendarScreen({ navigation }) {
   // ✅ האם המשתמש אישר את גרסת התקנון הנוכחית
   const hasAcceptedLatestTerms = useMemo(() => {
     if (!termsVersion) return false;
-    return userTermsAccepted && userTermsAcceptedVersion === termsVersion;
+    return (
+      userTermsAccepted && userTermsAcceptedVersion === termsVersion
+    );
   }, [userTermsAccepted, userTermsAcceptedVersion, termsVersion]);
 
   // ✅ מאזין לתור של המשתמש + הודעות חד-פעמיות
@@ -327,17 +337,22 @@ export default function CalendarScreen({ navigation }) {
 
           if (Platform.OS === "web") {
             window.alert(`התור אושר ✅\n\n${msg}`);
-            updateDoc(userResRef, { approvedAlertShown: true }).catch((e) =>
-              console.log("❌ update approvedAlertShown:", e?.message)
+            updateDoc(userResRef, { approvedAlertShown: true }).catch(
+              (e) =>
+                console.log("❌ update approvedAlertShown:", e?.message)
             );
           } else {
             Alert.alert("התור אושר ✅", msg, [
               {
                 text: "אישור",
                 onPress: () => {
-                  updateDoc(userResRef, { approvedAlertShown: true }).catch(
-                    (e) =>
-                      console.log("❌ update approvedAlertShown:", e?.message)
+                  updateDoc(userResRef, {
+                    approvedAlertShown: true,
+                  }).catch((e) =>
+                    console.log(
+                      "❌ update approvedAlertShown:",
+                      e?.message
+                    )
                   );
                 },
               },
@@ -353,7 +368,9 @@ export default function CalendarScreen({ navigation }) {
           const servicesArr = Array.isArray(data?.servicesSelected)
             ? data.servicesSelected
             : [];
-          const serviceNames = servicesArr.map((s) => s?.name).filter(Boolean);
+          const serviceNames = servicesArr
+            .map((s) => s?.name)
+            .filter(Boolean);
           const serviceLabel =
             serviceNames.length > 0
               ? serviceNames.join(", ")
@@ -380,20 +397,25 @@ export default function CalendarScreen({ navigation }) {
 
           if (Platform.OS === "web") {
             window.alert(fullText);
-            updateDoc(userResRef, { cancelledAlertShown: true }).catch((e) =>
-              console.log("❌ update cancelledAlertShown:", e?.message)
+            updateDoc(userResRef, { cancelledAlertShown: true }).catch(
+              (e) =>
+                console.log(
+                  "❌ update cancelledAlertShown:",
+                  e?.message
+                )
             );
           } else {
             Alert.alert("התור בוטל", fullText, [
               {
                 text: "אישור",
                 onPress: () => {
-                  updateDoc(userResRef, { cancelledAlertShown: true }).catch(
-                    (e) =>
-                      console.log(
-                        "❌ update cancelledAlertShown:",
-                        e?.message
-                      )
+                  updateDoc(userResRef, {
+                    cancelledAlertShown: true,
+                  }).catch((e) =>
+                    console.log(
+                      "❌ update cancelledAlertShown:",
+                      e?.message
+                    )
                   );
                 },
               },
@@ -443,36 +465,6 @@ export default function CalendarScreen({ navigation }) {
       } catch {}
     })();
   }, [userId, myRes]);
-
-  // ✅ נקודות ביומן
-  useEffect(() => {
-    const { start, endExclusive } = monthRange(calendarMonthDate);
-
-    const qAvail = query(
-      collection(db, "availability"),
-      where("date", ">=", start),
-      where("date", "<", endExclusive)
-    );
-
-    const unsub = onSnapshot(
-      qAvail,
-      (snap) => {
-        const marked = {};
-        snap.docs.forEach((d) => {
-          const data = d.data();
-          const date = data?.date || d.id;
-          const hours = Array.isArray(data?.hours) ? data.hours : [];
-          if (date && hours.length > 0) {
-            marked[date] = { marked: true, dotColor: colors.primary };
-          }
-        });
-        setOverrideDaysMarked(marked);
-      },
-      () => setOverrideDaysMarked({})
-    );
-
-    return () => unsub();
-  }, [calendarMonthDate]);
 
   // ✅ מאזין לרשימות המתנה שבהן המשתמש נמצא
   useEffect(() => {
@@ -555,6 +547,81 @@ export default function CalendarScreen({ navigation }) {
     return () => unsub();
   }, [userId]);
 
+  // ✅ מאזין לכל התורים העתידיים של הלקוחה (pending/approved, רק isHead)
+  useEffect(() => {
+    if (!userId) {
+      setMyFutureAppointments([]);
+      return;
+    }
+
+    const qApps = query(
+      collection(db, "appointments"),
+      where("userId", "==", userId)
+    );
+
+    const unsub = onSnapshot(
+      qApps,
+      (snap) => {
+        const now = Date.now();
+        const arr = [];
+
+        snap.docs.forEach((d) => {
+          const data = d.data() || {};
+          const date = data.date || "";
+          const hour = data.hour || "";
+          const status = data.status || "pending";
+
+          if (!date || !hour) return;
+
+          // רק תורים פעילים (pending / approved)
+          if (status !== "pending" && status !== "approved") return;
+
+          // רק השעה הראשונה של התור
+          if (!data.isHead) return;
+
+          const dt = toLocalDateTime(date, hour);
+          if (!dt) return;
+
+          // מדלגים על תורים שעברו
+          if (dt.getTime() < now - 60 * 1000) return;
+
+          arr.push({ id: d.id, ...data });
+        });
+
+        // מיון לפי זמן
+        arr.sort((a, b) => {
+          const adt = toLocalDateTime(a.date, a.hour);
+          const bdt = toLocalDateTime(b.date, b.hour);
+          if (!adt || !bdt) return 0;
+          return adt.getTime() - bdt.getTime();
+        });
+
+        setMyFutureAppointments(arr);
+      },
+      (err) => {
+        console.log(
+          "❌ appointments/user listen error:",
+          err?.code,
+          err?.message
+        );
+        setMyFutureAppointments([]);
+      }
+    );
+
+    return () => unsub();
+  }, [userId]);
+
+  // ✅ חלוקה לתורים מאושרים ותורים שממתינים לאישור
+  const approvedFutureAppointments = useMemo(
+    () => myFutureAppointments.filter((a) => a.status === "approved"),
+    [myFutureAppointments]
+  );
+
+  const pendingFutureAppointments = useMemo(
+    () => myFutureAppointments.filter((a) => a.status === "pending"),
+    [myFutureAppointments]
+  );
+
   async function handleLogout() {
     try {
       await signOut(auth);
@@ -579,7 +646,6 @@ export default function CalendarScreen({ navigation }) {
   // ✅ תור פעיל בלבד – *שלא עבר* בזמן
   const activeRes = useMemo(() => {
     if (!myRes) return null;
-    // אם התור כבר עבר – לא נחשב כ"תור פעיל"
     if (isReservationPassed(myRes)) return null;
 
     return myRes.status === "pending" || myRes.status === "approved"
@@ -587,7 +653,7 @@ export default function CalendarScreen({ navigation }) {
       : null;
   }, [myRes]);
 
-  // ✅ ביטול תור על ידי הלקוחה
+  // ✅ ביטול תור על ידי הלקוחה (התור הראשי מ-userReservations)
   async function cancelMyReservationFromCalendar() {
     if (!userId) {
       showMsg("שגיאה", "את חייבת להיות מחוברת");
@@ -647,7 +713,11 @@ export default function CalendarScreen({ navigation }) {
       try {
         const batch = writeBatch(db);
         hoursArr.forEach((h) => {
-          const appRef = doc(db, "appointments", makeAppointmentDocId(date, h));
+          const appRef = doc(
+            db,
+            "appointments",
+            makeAppointmentDocId(date, h)
+          );
           batch.delete(appRef);
         });
         await batch.commit();
@@ -701,10 +771,134 @@ export default function CalendarScreen({ navigation }) {
     }
   }
 
-  // ✅ ביטול מהרשמת המתנה מתוך היומן
+  // ✅ ביטול תור מתוך רשימת "תורים שמחכים לאישור"
+  async function cancelPendingAppointment(app) {
+    if (!userId || !app) {
+      showMsg("שגיאה", "לא נמצא תור לביטול");
+      return;
+    }
+
+    try {
+      const date = app.date;
+      const hour = app.hour;
+
+      if (!date) {
+        showMsg("שגיאה", "חסר תאריך לתור לביטול");
+        return;
+      }
+
+      const hoursArr =
+        Array.isArray(app.slots) && app.slots.length
+          ? app.slots
+          : hour
+          ? [hour]
+          : [];
+
+      if (!hoursArr.length) {
+        showMsg("שגיאה", "לא נמצאו שעות לתור לביטול");
+        return;
+      }
+
+      const groupId =
+        app.groupId ||
+        (app.appointmentId ||
+          (date && hour ? makeAppointmentDocId(date, hour) : null));
+
+      // 🔹 שלב 1 – מנסים למחוק את הסלוטים מ-appointments
+      try {
+        const batch = writeBatch(db);
+        hoursArr.forEach((h) => {
+          const appRef = doc(
+            db,
+            "appointments",
+            makeAppointmentDocId(date, h)
+          );
+          batch.delete(appRef);
+        });
+        await batch.commit();
+      } catch (e) {
+        console.log(
+          "⚠️ cancelPendingAppointment: לא הצלחתי למחוק מה-appointments:",
+          e?.code,
+          e?.message
+        );
+      }
+
+      // 🔹 שלב 2 – מסמנים בקשות ממתינות כ-cancelled
+      if (groupId) {
+        try {
+          const qReq = query(
+            collection(db, "appointmentRequests"),
+            where("userId", "==", userId),
+            where("groupId", "==", groupId),
+            where("status", "==", "pending")
+          );
+          const snapReq = await getDocs(qReq);
+          if (!snapReq.empty) {
+            const batch = writeBatch(db);
+            snapReq.forEach((docSnap) => {
+              batch.update(docSnap.ref, {
+                status: "cancelled",
+                cancelledAt: serverTimestamp(),
+                cancelledBy: userId,
+              });
+            });
+            await batch.commit();
+          }
+        } catch (e) {
+          console.log(
+            "⚠️ cancelPendingAppointment: cleanup appointmentRequests:",
+            e?.code,
+            e?.message
+          );
+        }
+      }
+
+      // 🔹 שלב 3 – אם userReservations תואם לבקשה הזו, נמחק אותו גם
+      try {
+        const userResRef = doc(db, "userReservations", userId);
+        const userResSnap = await getDoc(userResRef);
+        if (userResSnap.exists()) {
+          const r = userResSnap.data() || {};
+          const rGroupId =
+            r.groupId ||
+            (r.appointmentId ||
+              (r.date && r.hour
+                ? makeAppointmentDocId(r.date, r.hour)
+                : null));
+
+          const isSameGroup =
+            (groupId && rGroupId && groupId === rGroupId) ||
+            (r.date === date && r.hour === hour);
+
+          if (isSameGroup && r.status === "pending") {
+            await deleteDoc(userResRef);
+            deleteAlertShownRef.current = false;
+          }
+        }
+      } catch (e) {
+        console.log(
+          "⚠️ cancelPendingAppointment: userReservations cleanup:",
+          e?.code,
+          e?.message
+        );
+      }
+
+      showMsg("בוטל", "הבקשה לתור בוטלה בהצלחה.");
+    } catch (e) {
+      console.log(
+        "❌ cancelPendingAppointment error:",
+        e?.code,
+        e?.message
+      );
+      showMsg("שגיאה", e?.message || "לא הצליח לבטל את הבקשה לתור");
+    }
+  }
+
+  // ✅ ביטול מהרשמת מתנה מתוך היומן
   async function cancelWaitlistEntry(entry) {
     if (!userId || !entry) {
-      showMsg("שגיאה", "לא נמצאה רשימת המתנה לביטול");
+      showMsg("שגיאה", "לא נמצאה רשימת מתנה לביטול");
       return;
     }
 
@@ -757,11 +951,11 @@ export default function CalendarScreen({ navigation }) {
     }
   }
 
-  // ✅ markedDates
+  // ✅ markedDates – היום שנבחר + כל התאריכים עם תור עתידי (ששריינו)
   const markedDates = useMemo(() => {
-    const out = { ...overrideDaysMarked };
+    const out = {};
 
-    // ✅ היום שהמשתמש בחר – עיגול רגיל (primary)
+    // היום שהמשתמש בחר – עיגול
     if (selectedDate) {
       out[selectedDate] = {
         ...(out[selectedDate] || {}),
@@ -770,17 +964,27 @@ export default function CalendarScreen({ navigation }) {
       };
     }
 
-    // ✅ תור פעיל – רק נקודה בצבע משני, בלי עיגול
+    // כל התאריכים שיש בהם תור עתידי שהלקוח שריין (שעה ראשית isHead)
+    myFutureAppointments.forEach((app) => {
+      if (!app.date) return;
+      out[app.date] = {
+        ...(out[app.date] || {}),
+        marked: true,
+        dotColor: colors.secondary,
+      };
+    });
+
+    // אם יש activeRes (מהמסמך userReservations) – נשמור גם עליו את הנקודה
     if (activeRes?.date) {
       out[activeRes.date] = {
         ...(out[activeRes.date] || {}),
         marked: true,
-        dotColor: colors.secondary, // נקודה ורודה במקום עיגול
+        dotColor: colors.secondary,
       };
     }
 
     return out;
-  }, [overrideDaysMarked, activeRes, selectedDate]);
+  }, [myFutureAppointments, activeRes, selectedDate]);
 
   const MenuItem = ({ text, danger, onPress }) => (
     <Pressable
@@ -943,17 +1147,6 @@ export default function CalendarScreen({ navigation }) {
             >
               בחרי תאריך ביומן כדי להמשיך
             </Text>
-
-            {/* <Text
-              style={{
-                marginTop: rf(6),
-                color: "#666",
-                fontWeight: "700",
-                textAlign: "center",
-              }}
-            >
-              נקודה מתחת ליום = שעות מיוחדות שהוגדרו ידנית
-            </Text> */}
           </View>
 
           {/* Calendar */}
@@ -971,7 +1164,7 @@ export default function CalendarScreen({ navigation }) {
               markedDates={markedDates}
               onMonthChange={(m) => setCalendarMonthDate(m.dateString)}
               onDayPress={(day) => {
-                // ✅ קודם כל לסמן את היום שנלחץ – כדי שיקבל עיגול
+                // ✅ קודם לסמן את היום שנלחץ (עיגול)
                 setSelectedDate(day.dateString);
 
                 if (!hasAcceptedLatestTerms) {
@@ -1030,7 +1223,7 @@ export default function CalendarScreen({ navigation }) {
             />
           </View>
 
-          {/* My Reservation */}
+          {/* My Reservation (תקציר תור אחד – כמו שהיה) */}
           <View
             style={{
               marginTop: rf(12),
@@ -1205,8 +1398,8 @@ export default function CalendarScreen({ navigation }) {
             )}
           </View>
 
-          {/* My Waitlists */}
-          {myWaitlistEntries.length > 0 && (
+          {/* בלוק: תורים מאושרים */}
+          {approvedFutureAppointments.length > 0 && (
             <View
               style={{
                 marginTop: rf(12),
@@ -1218,7 +1411,6 @@ export default function CalendarScreen({ navigation }) {
                 paddingHorizontal: rf(12),
               }}
             >
-              {/* כותרת + קו תחתון */}
               <View
                 style={{
                   paddingBottom: rf(8),
@@ -1234,139 +1426,405 @@ export default function CalendarScreen({ navigation }) {
                     textAlign: "center",
                   }}
                 >
-                  רשימת ההמתנה שלי
+                  תורים מאושרים
                 </Text>
               </View>
 
-              {myWaitlistEntries.map((w, index) => (
-                <View
-                  key={w.id}
-                  style={{
-                    marginTop: index === 0 ? rf(4) : rf(8),
-                    paddingVertical: rf(6),
-                    borderTopWidth: index === 0 ? 0 : 1,
-                    borderTopColor: colors.border,
-                  }}
-                >
-                  <Text
+              <View style={{ marginTop: rf(6) }}>
+                {approvedFutureAppointments.map((app, index) => (
+                  <View
+                    key={app.id}
                     style={{
-                      textAlign: "center",
-                      fontWeight: "900",
-                      fontSize: rf(16),
-                      color: colors.textDark,
+                      marginTop: index === 0 ? rf(4) : rf(8),
+                      paddingVertical: rf(6),
+                      borderTopWidth: index === 0 ? 0 : 1,
+                      borderTopColor: colors.border,
                     }}
                   >
-                    {w.date} • {w.hour}
-                  </Text>
-
-                  <Text
-                    style={{
-                      marginTop: rf(3),
-                      textAlign: "center",
-                      fontWeight: "700",
-                      fontSize: rf(13),
-                      color: "#555",
-                    }}
-                  >
-                    {`המיקום שלך בתור הוא ${w.position}`}
-                  </Text>
-
-                  {w.holdForMe && (
                     <Text
                       style={{
-                        marginTop: rf(2),
+                        textAlign: "center",
+                        fontWeight: "900",
+                        fontSize: rf(16),
+                        color: colors.textDark,
+                      }}
+                    >
+                      {app.date} • {app.hour}
+                    </Text>
+
+                    <Text
+                      style={{
+                        marginTop: rf(3),
                         textAlign: "center",
                         fontWeight: "700",
                         fontSize: rf(13),
                         color: "#4CAF50",
                       }}
                     >
-                      יש לך כרגע זכות ראשונים על השעה הזאת 🕒
+                      סטטוס: מאושר ✅
                     </Text>
-                  )}
 
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        gap: rf(10),
+                        marginTop: rf(8),
+                      }}
+                    >
+                      <Pressable
+                        onPress={() => {
+                          navigation.navigate("Day", {
+                            selectedDate: app.date,
+                            date: app.date,
+                            requireApproval: true,
+                          });
+                        }}
+                        style={{
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: colors.primary,
+                          paddingVertical: rf(10),
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: colors.primary,
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          מעבר לתאריך
+                        </Text>
+                      </Pressable>
+
+                      {/* ביטול תור ספציפי נעשה מתוך מסך היום עצמו */}
+                      <View style={{ flex: 1 }} />
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* בלוק: תורים שממתינים לאישור */}
+          {pendingFutureAppointments.length > 0 && (
+            <View
+              style={{
+                marginTop: rf(12),
+                backgroundColor: "rgba(255,255,255,0.9)",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                paddingVertical: rf(12),
+                paddingHorizontal: rf(12),
+              }}
+            >
+              <View
+                style={{
+                  paddingBottom: rf(8),
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontWeight: "900",
+                    color: colors.primary,
+                    fontSize: rf(16),
+                    textAlign: "center",
+                  }}
+                >
+                  תורים שמחכים לאישור
+                </Text>
+              </View>
+
+              <View style={{ marginTop: rf(6) }}>
+                {pendingFutureAppointments.map((app, index) => (
                   <View
+                    key={app.id}
                     style={{
-                      flexDirection: "row",
-                      gap: rf(10),
-                      marginTop: rf(8),
+                      marginTop: index === 0 ? rf(4) : rf(8),
+                      paddingVertical: rf(6),
+                      borderTopWidth: index === 0 ? 0 : 1,
+                      borderTopColor: colors.border,
                     }}
                   >
-                    <Pressable
-                      onPress={() => {
-                        navigation.navigate("Day", {
-                          selectedDate: w.date,
-                          date: w.date,
-                          requireApproval: true,
-                        });
-                      }}
+                    <Text
                       style={{
-                        flex: 1,
-                        backgroundColor: "rgba(255,255,255,0.95)",
-                        borderRadius: rf(12),
-                        borderWidth: 1,
-                        borderColor: colors.primary,
-                        paddingVertical: rf(10),
-                        alignItems: "center",
+                        textAlign: "center",
+                        fontWeight: "900",
+                        fontSize: rf(16),
+                        color: colors.textDark,
                       }}
                     >
-                      <Text
+                      {app.date} • {app.hour}
+                    </Text>
+
+                    <Text
+                      style={{
+                        marginTop: rf(3),
+                        textAlign: "center",
+                        fontWeight: "700",
+                        fontSize: rf(13),
+                        color: "#F5A623",
+                      }}
+                    >
+                      סטטוס: ממתין לאישור ⏳
+                    </Text>
+
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        gap: rf(10),
+                        marginTop: rf(8),
+                      }}
+                    >
+                      <Pressable
+                        onPress={() => {
+                          navigation.navigate("Day", {
+                            selectedDate: app.date,
+                            date: app.date,
+                            requireApproval: true,
+                          });
+                        }}
                         style={{
-                          color: colors.primary,
-                          fontWeight: "900",
-                          fontSize: rf(14),
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: colors.primary,
+                          paddingVertical: rf(10),
+                          alignItems: "center",
                         }}
                       >
-                        מעבר לתאריך
-                      </Text>
-                    </Pressable>
+                        <Text
+                          style={{
+                            color: colors.primary,
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          מעבר לתאריך
+                        </Text>
+                      </Pressable>
 
-                    <Pressable
-                      onPress={() => {
-                        if (Platform.OS === "web") {
-                          const ok = window.confirm(
-                            "להסיר אותך מרשימת ההמתנה לשעה הזו?"
+                      {/* 👉 כפתור ביטול בקשה – עם אישור ואז ביטול בפיירסטור */}
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === "web") {
+                            const ok = window.confirm(
+                              "לבטל את הבקשה לתור הזה?"
+                            );
+                            if (ok) cancelPendingAppointment(app);
+                            return;
+                          }
+
+                          Alert.alert(
+                            "ביטול בקשה",
+                            "לבטל את הבקשה לתור הזה?",
+                            [
+                              { text: "לא", style: "cancel" },
+                              {
+                                text: "כן",
+                                style: "destructive",
+                                onPress: () => cancelPendingAppointment(app),
+                              },
+                            ]
                           );
-                          if (ok) cancelWaitlistEntry(w);
-                          return;
-                        }
-
-                        Alert.alert(
-                          "ביטול רשימת המתנה",
-                          "להסיר אותך מרשימת ההמתנה לשעה הזו?",
-                          [
-                            { text: "לא", style: "cancel" },
-                            {
-                              text: "כן",
-                              style: "destructive",
-                              onPress: () => cancelWaitlistEntry(w),
-                            },
-                          ]
-                        );
-                      }}
-                      style={{
-                        flex: 1,
-                        backgroundColor: "rgba(255,255,255,0.95)",
-                        borderRadius: rf(12),
-                        borderWidth: 1,
-                        borderColor: "#D6455D",
-                        paddingVertical: rf(10),
-                        alignItems: "center",
-                      }}
-                    >
-                      <Text
+                        }}
                         style={{
-                          color: "#D6455D",
-                          fontWeight: "900",
-                          fontSize: rf(14),
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: "#D6455D",
+                          paddingVertical: rf(10),
+                          alignItems: "center",
                         }}
                       >
-                        ביטול מהרשימה
-                      </Text>
-                    </Pressable>
+                        <Text
+                          style={{
+                            color: "#D6455D",
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          ביטול בקשה
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
-                </View>
-              ))}
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* בלוק: רשימות המתנה */}
+          {myWaitlistEntries.length > 0 && (
+            <View
+              style={{
+                marginTop: rf(12),
+                backgroundColor: "rgba(255,255,255,0.9)",
+                borderRadius: rf(14),
+                borderWidth: 1,
+                borderColor: colors.border,
+                paddingVertical: rf(12),
+                paddingHorizontal: rf(12),
+              }}
+            >
+              <View
+                style={{
+                  paddingBottom: rf(8),
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    fontWeight: "900",
+                    color: colors.primary,
+                    fontSize: rf(16),
+                    textAlign: "center",
+                  }}
+                >
+                  רשימות המתנה
+                </Text>
+              </View>
+
+              <View style={{ marginTop: rf(6) }}>
+                {myWaitlistEntries.map((w, index) => (
+                  <View
+                    key={w.id}
+                    style={{
+                      marginTop: index === 0 ? rf(4) : rf(8),
+                      paddingVertical: rf(6),
+                      borderTopWidth: index === 0 ? 0 : 1,
+                      borderTopColor: colors.border,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        textAlign: "center",
+                        fontWeight: "900",
+                        fontSize: rf(16),
+                        color: colors.textDark,
+                      }}
+                    >
+                      {w.date} • {w.hour}
+                    </Text>
+
+                    <Text
+                      style={{
+                        marginTop: rf(3),
+                        textAlign: "center",
+                        fontWeight: "700",
+                        fontSize: rf(13),
+                        color: "#555",
+                      }}
+                    >
+                      {`המיקום שלך בתור הוא ${w.position}`}
+                    </Text>
+
+                    {w.holdForMe && (
+                      <Text
+                        style={{
+                          marginTop: rf(2),
+                          textAlign: "center",
+                          fontWeight: "700",
+                          fontSize: rf(13),
+                          color: "#4CAF50",
+                        }}
+                      >
+                        יש לך כרגע זכות ראשונים על השעה הזאת 🕒
+                      </Text>
+                    )}
+
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        gap: rf(10),
+                        marginTop: rf(8),
+                      }}
+                    >
+                      <Pressable
+                        onPress={() => {
+                          navigation.navigate("Day", {
+                            selectedDate: w.date,
+                            date: w.date,
+                            requireApproval: true,
+                          });
+                        }}
+                        style={{
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: colors.primary,
+                          paddingVertical: rf(10),
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: colors.primary,
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          מעבר לתאריך
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === "web") {
+                            const ok = window.confirm(
+                              "להסיר אותך מרשימת ההמתנה לשעה הזו?"
+                            );
+                            if (ok) cancelWaitlistEntry(w);
+                            return;
+                          }
+
+                          Alert.alert(
+                            "ביטול רשימת המתנה",
+                            "להסיר אותך מרשימת ההמתנה לשעה הזו?",
+                            [
+                              { text: "לא", style: "cancel" },
+                              {
+                                text: "כן",
+                                style: "destructive",
+                                onPress: () => cancelWaitlistEntry(w),
+                              },
+                            ]
+                          );
+                        }}
+                        style={{
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: "#D6455D",
+                          paddingVertical: rf(10),
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#D6455D",
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          ביטול מהרשימה
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ))}
+              </View>
             </View>
           )}
         </ScrollView>
