@@ -390,7 +390,7 @@ export default function CalendarScreen({ navigation }) {
           } else if (serviceLabel) {
             baseText = `התור שלך ל${serviceLabel} בוטל ע"י בעלת העסק.`;
           } else {
-            baseText = 'התור שלך בוטל ע"י בעלת העסק.';
+            baseText = "התור שלך בוטל ע\"י בעלת העסק.";
           }
 
           const fullText = `${baseText}\n\nניתן לקבוע תור חדש מהיומן.`;
@@ -653,124 +653,6 @@ export default function CalendarScreen({ navigation }) {
       : null;
   }, [myRes]);
 
-  // ✅ ביטול תור על ידי הלקוחה (התור הראשי מ-userReservations)
-  async function cancelMyReservationFromCalendar() {
-    if (!userId) {
-      showMsg("שגיאה", "את חייבת להיות מחוברת");
-      return;
-    }
-    if (!activeRes) {
-      showMsg("שגיאה", "אין תור פעיל לביטול");
-      return;
-    }
-
-    const userResRef = doc(db, "userReservations", userId);
-
-    try {
-      const snap = await getDoc(userResRef);
-      if (!snap.exists()) {
-        showMsg("שגיאה", "אין תור פעיל לביטול");
-        return;
-      }
-
-      const data = snap.data();
-
-      if (isReservationPassed(data)) {
-        showMsg("לא ניתן לבטל", "התור כבר עבר ולכן לא ניתן לבטל אותו.");
-        return;
-      }
-
-      const date = data.date;
-      if (!date) {
-        showMsg("שגיאה", "חסר תאריך לתור");
-        return;
-      }
-
-      const hoursArr =
-        Array.isArray(data.slots) && data.slots.length
-          ? data.slots
-          : data.hour
-          ? [data.hour]
-          : [];
-
-      if (!hoursArr.length) {
-        showMsg("שגיאה", "לא נמצאו שעות לתור לביטול");
-        return;
-      }
-
-      const groupId =
-        data.groupId ||
-        (data.appointmentId ||
-          (data.date && data.hour
-            ? makeAppointmentDocId(data.date, data.hour)
-            : null));
-
-      // 🔹 שלב 1 – מוחקים את המסמך של הלקוחה
-      await deleteDoc(userResRef);
-      deleteAlertShownRef.current = false;
-
-      // 🔹 שלב 2 – מנסים לשחרר את הסלוטים ב-appointments
-      try {
-        const batch = writeBatch(db);
-        hoursArr.forEach((h) => {
-          const appRef = doc(
-            db,
-            "appointments",
-            makeAppointmentDocId(date, h)
-          );
-          batch.delete(appRef);
-        });
-        await batch.commit();
-      } catch (e) {
-        console.log(
-          "⚠️ לא הצלחתי למחוק מה-appointments (כנראה בעיית הרשאות):",
-          e?.code,
-          e?.message
-        );
-      }
-
-      // 🔹 שלב 3 – נסמן בקשות ממתינות כ-cancelled
-      if (groupId) {
-        try {
-          const qReq = query(
-            collection(db, "appointmentRequests"),
-            where("userId", "==", userId),
-            where("groupId", "==", groupId),
-            where("status", "==", "pending")
-          );
-
-          const snapReq = await getDocs(qReq);
-          if (!snapReq.empty) {
-            const batch = writeBatch(db);
-            snapReq.forEach((docSnap) => {
-              batch.update(docSnap.ref, {
-                status: "cancelled",
-                cancelledAt: serverTimestamp(),
-                cancelledBy: userId,
-              });
-            });
-            await batch.commit();
-          }
-        } catch (e) {
-          console.log(
-            "⚠️ cleanup appointmentRequests after cancel:",
-            e?.code,
-            e?.message
-          );
-        }
-      }
-
-      showMsg("בוטל", "התור בוטל בהצלחה");
-    } catch (e) {
-      console.log(
-        "❌ cancelMyReservationFromCalendar error:",
-        e?.code,
-        e?.message
-      );
-      showMsg("שגיאה", e?.message || "לא הצליח לבטל תור");
-    }
-  }
-
   // ✅ ביטול תור מתוך רשימת "תורים שמחכים לאישור"
   async function cancelPendingAppointment(app) {
     if (!userId || !app) {
@@ -895,6 +777,136 @@ export default function CalendarScreen({ navigation }) {
     }
   }
 
+  // ✅ ביטול תור מאושר מתוך הבלוק של "תורים מאושרים"
+  async function cancelApprovedAppointment(app) {
+    if (!userId || !app) {
+      showMsg("שגיאה", "לא נמצא תור לביטול");
+      return;
+    }
+
+    try {
+      const date = app.date;
+      const hour = app.hour;
+
+      if (!date) {
+        showMsg("שגיאה", "חסר תאריך לתור לביטול");
+        return;
+      }
+
+      const hoursArr =
+        Array.isArray(app.slots) && app.slots.length
+          ? app.slots
+          : hour
+          ? [hour]
+          : [];
+
+      if (!hoursArr.length) {
+        showMsg("שגיאה", "לא נמצאו שעות לתור לביטול");
+        return;
+      }
+
+      const groupId =
+        app.groupId ||
+        (app.appointmentId ||
+          (date && hour ? makeAppointmentDocId(date, hour) : null));
+
+      // 🔹 שלב 1 – מנסים למחוק את הסלוטים מ-appointments
+      try {
+        const batch = writeBatch(db);
+        hoursArr.forEach((h) => {
+          const appRef = doc(
+            db,
+            "appointments",
+            makeAppointmentDocId(date, h)
+          );
+          batch.delete(appRef);
+        });
+        await batch.commit();
+      } catch (e) {
+        console.log(
+          "⚠️ cancelApprovedAppointment: לא הצלחתי למחוק מה-appointments:",
+          e?.code,
+          e?.message
+        );
+      }
+
+      // 🔹 שלב 2 – מסמנים בקשות מאושרות/ממתינות כ-cancelled
+      if (groupId) {
+        const statusesToCancel = ["approved", "pending"];
+        for (const st of statusesToCancel) {
+          try {
+            const qReq = query(
+              collection(db, "appointmentRequests"),
+              where("userId", "==", userId),
+              where("groupId", "==", groupId),
+              where("status", "==", st)
+            );
+            const snapReq = await getDocs(qReq);
+            if (!snapReq.empty) {
+              const batch = writeBatch(db);
+              snapReq.forEach((docSnap) => {
+                batch.update(docSnap.ref, {
+                  status: "cancelled",
+                  cancelledAt: serverTimestamp(),
+                  cancelledBy: userId,
+                });
+              });
+              await batch.commit();
+            }
+          } catch (e) {
+            console.log(
+              "⚠️ cancelApprovedAppointment: cleanup appointmentRequests:",
+              e?.code,
+              e?.message
+            );
+          }
+        }
+      }
+
+      // 🔹 שלב 3 – אם userReservations תואם לתור המאושר הזה, נמחק אותו גם
+      try {
+        const userResRef = doc(db, "userReservations", userId);
+        const userResSnap = await getDoc(userResRef);
+        if (userResSnap.exists()) {
+          const r = userResSnap.data() || {};
+          const rGroupId =
+            r.groupId ||
+            (r.appointmentId ||
+              (r.date && r.hour
+                ? makeAppointmentDocId(r.date, r.hour)
+                : null));
+
+          const isSameGroup =
+            (groupId && rGroupId && groupId === rGroupId) ||
+            (r.date === date && r.hour === hour);
+
+          if (
+            isSameGroup &&
+            (r.status === "approved" || r.status === "pending")
+          ) {
+            await deleteDoc(userResRef);
+            deleteAlertShownRef.current = false;
+          }
+        }
+      } catch (e) {
+        console.log(
+          "⚠️ cancelApprovedAppointment: userReservations cleanup:",
+          e?.code,
+          e?.message
+        );
+      }
+
+      showMsg("בוטל", "התור אושר ובוטל בהצלחה.");
+    } catch (e) {
+      console.log(
+        "❌ cancelApprovedAppointment error:",
+        e?.code,
+        e?.message
+      );
+      showMsg("שגיאה", e?.message || "לא הצליח לבטל את התור המאושר");
+    }
+  }
+
   // ✅ ביטול מהרשמת מתנה מתוך היומן
   async function cancelWaitlistEntry(entry) {
     if (!userId || !entry) {
@@ -1013,18 +1025,6 @@ export default function CalendarScreen({ navigation }) {
       </Text>
     </Pressable>
   );
-
-  const passed = activeRes ? isReservationPassed(activeRes) : false;
-  const niceService = activeRes?.serviceType
-    ? ` (${activeRes.serviceType})`
-    : "";
-
-  const statusLabel =
-    activeRes?.status === "approved"
-      ? "מאושר ✅"
-      : activeRes?.status === "pending"
-      ? "ממתין לאישור ⏳"
-      : activeRes?.status || "—";
 
   // 💡 עד ש-backgroundAllAppUrl לא נטען – לא מציגים רקע ישן
   if (backgroundAllAppUrl === undefined) {
@@ -1223,180 +1223,7 @@ export default function CalendarScreen({ navigation }) {
             />
           </View>
 
-          {/* My Reservation (תקציר תור אחד – כמו שהיה) */}
-          <View
-            style={{
-              marginTop: rf(12),
-              backgroundColor: "rgba(255,255,255,0.9)",
-              borderRadius: rf(14),
-              borderWidth: 1,
-              borderColor: colors.border,
-              paddingVertical: rf(12),
-              paddingHorizontal: rf(12),
-            }}
-          >
-            {/* כותרת + קו תחתון */}
-            <View
-              style={{
-                paddingBottom: rf(8),
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}
-            >
-              <Text
-                style={{
-                  fontWeight: "900",
-                  color: colors.primary,
-                  fontSize: rf(16),
-                  textAlign: "center",
-                }}
-              >
-                התור שלי
-              </Text>
-            </View>
-
-            {!activeRes ? (
-              <Text
-                style={{
-                  marginTop: rf(8),
-                  textAlign: "center",
-                  color: "gray",
-                  fontWeight: "700",
-                  fontSize: rf(14),
-                }}
-              >
-                אין לך תור פעיל כרגע
-              </Text>
-            ) : (
-              <>
-                <Text
-                  style={{
-                    marginTop: rf(8),
-                    textAlign: "center",
-                    color: colors.textDark,
-                    fontWeight: "900",
-                    fontSize: rf(16),
-                  }}
-                >
-                  {activeRes.date} • {activeRes.hour} {niceService}
-                </Text>
-
-                <Text
-                  style={{
-                    marginTop: 6,
-                    textAlign: "center",
-                    fontWeight: "900",
-                    color:
-                      activeRes.status === "approved" ? "#4CAF50" : "#F5A623",
-                  }}
-                >
-                  סטטוס: {statusLabel}
-                </Text>
-
-                <View
-                  style={{
-                    flexDirection: "row",
-                    gap: rf(10),
-                    marginTop: rf(12),
-                  }}
-                >
-                  <Pressable
-                    onPress={() => {
-                      if (!hasAcceptedLatestTerms) {
-                        const msg =
-                          "לפני קביעת תור חדש או שינוי תור יש לאשר את התקנון המעודכן במסך התקנון.";
-
-                        if (Platform.OS === "web") {
-                          const go = window.confirm(
-                            `${msg}\n\nלעבור למסך התקנון עכשיו?`
-                          );
-                          if (go) {
-                            navigation.navigate("Terms");
-                          }
-                        } else {
-                          Alert.alert("נדרש אישור תקנון", msg, [
-                            { text: "ביטול", style: "cancel" },
-                            {
-                              text: "מעבר לתקנון",
-                              onPress: () => navigation.navigate("Terms"),
-                            },
-                          ]);
-                        }
-                        return;
-                      }
-
-                      navigation.navigate("Day", {
-                        selectedDate: activeRes.date,
-                        date: activeRes.date,
-                        requireApproval: true,
-                      });
-                    }}
-                    style={{
-                      flex: 1,
-                      backgroundColor: "rgba(255,255,255,0.95)",
-                      borderRadius: rf(12),
-                      borderWidth: 1,
-                      borderColor: colors.primary,
-                      paddingVertical: rf(10),
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: colors.primary,
-                        fontWeight: "900",
-                        fontSize: rf(14),
-                      }}
-                    >
-                      מעבר לתאריך
-                    </Text>
-                  </Pressable>
-
-                  {!passed ? (
-                    <Pressable
-                      onPress={() => {
-                        if (Platform.OS === "web") {
-                          const ok = window.confirm("לבטל את התור?");
-                          if (ok) cancelMyReservationFromCalendar();
-                          return;
-                        }
-
-                        Alert.alert("ביטול תור", "לבטל את התור?", [
-                          { text: "לא", style: "cancel" },
-                          {
-                            text: "כן",
-                            style: "destructive",
-                            onPress: cancelMyReservationFromCalendar,
-                          },
-                        ]);
-                      }}
-                      style={{
-                        flex: 1,
-                        backgroundColor: "rgba(255,255,255,0.95)",
-                        borderRadius: rf(12),
-                        borderWidth: 1,
-                        borderColor: "#D6455D",
-                        paddingVertical: rf(10),
-                        alignItems: "center",
-                      }}
-                    >
-                      <Text
-                        style={{
-                          color: "#D6455D",
-                          fontWeight: "900",
-                          fontSize: rf(14),
-                        }}
-                      >
-                        ביטול תור
-                      </Text>
-                    </Pressable>
-                  ) : (
-                    <View style={{ flex: 1 }} />
-                  )}
-                </View>
-              </>
-            )}
-          </View>
+          {/* 🔥 שימי לב: בלוק "התור שלי" הוסר לפי בקשתך */}
 
           {/* בלוק: תורים מאושרים */}
           {approvedFutureAppointments.length > 0 && (
@@ -1500,8 +1327,50 @@ export default function CalendarScreen({ navigation }) {
                         </Text>
                       </Pressable>
 
-                      {/* ביטול תור ספציפי נעשה מתוך מסך היום עצמו */}
-                      <View style={{ flex: 1 }} />
+                      {/* 👉 כפתור ביטול תור מאושר מצד ימין */}
+                      <Pressable
+                        onPress={() => {
+                          if (Platform.OS === "web") {
+                            const ok = window.confirm(
+                              "לבטל את התור המאושר הזה?"
+                            );
+                            if (ok) cancelApprovedAppointment(app);
+                            return;
+                          }
+
+                          Alert.alert(
+                            "ביטול תור",
+                            "לבטל את התור המאושר הזה?",
+                            [
+                              { text: "לא", style: "cancel" },
+                              {
+                                text: "כן",
+                                style: "destructive",
+                                onPress: () => cancelApprovedAppointment(app),
+                              },
+                            ]
+                          );
+                        }}
+                        style={{
+                          flex: 1,
+                          backgroundColor: "rgba(255,255,255,0.95)",
+                          borderRadius: rf(12),
+                          borderWidth: 1,
+                          borderColor: "#D6455D",
+                          paddingVertical: rf(10),
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: "#D6455D",
+                            fontWeight: "900",
+                            fontSize: rf(14),
+                          }}
+                        >
+                          ביטול תור
+                        </Text>
+                      </Pressable>
                     </View>
                   </View>
                 ))}
@@ -1611,7 +1480,7 @@ export default function CalendarScreen({ navigation }) {
                         </Text>
                       </Pressable>
 
-                      {/* 👉 כפתור ביטול בקשה – עם אישור ואז ביטול בפיירסטור */}
+                      {/* 👉 כפתור ביטול בקשה */}
                       <Pressable
                         onPress={() => {
                           if (Platform.OS === "web") {

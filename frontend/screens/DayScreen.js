@@ -593,7 +593,7 @@ export default function DayScreen({ route, navigation }) {
       await ensureHoldIfNeeded(dateStr, hour);
     } catch (e) {
       console.log("❌ toggleWaitlist error:", e);
-      showAlert("שגיאה", e?.message || "לא הצלחנו לעדכן את רשימת ההמתנה");
+      showAlert("שגיאה", e?.message || "לא הצלחנו לעדכן את רשימת המתנה");
     }
   }
 
@@ -668,9 +668,6 @@ export default function DayScreen({ route, navigation }) {
 
     return () => unsub();
   }, [userId]);
-
-  // ✅ לא משתמשים יותר ב-hasActiveReservation להגבלה – ההגבלה עוברת ל־3 תורים בבדיקה מתוך appointments.
-  // (נשאיר את myRes בשביל שימושים אחרים אם יהיו בהמשך)
 
   // --- listen settings/business (default hours + services) ---
   useEffect(() => {
@@ -826,8 +823,6 @@ export default function DayScreen({ route, navigation }) {
       return;
     }
 
-    // ❌ כבר לא בודקים כאן "יש לך תור פעיל" – ההגבלה נעשית לפי 3 תורים ב-reserveHourWithServices
-
     if (appointmentByHour[hour]) {
       showAlert("שגיאה", "השעה הזו כבר תפוסה.");
       return;
@@ -862,35 +857,67 @@ export default function DayScreen({ route, navigation }) {
     setServiceModalOpen(true);
   }
 
-  // ✅ פונקציה עוזרת – כמה תורים עתידיים כבר יש ללקוחה
+  // ✅ פונקציה עוזרת – כמה תורים/המתנות עתידיים כבר יש ללקוחה (Approved + Pending + Waitlist)
   async function countActiveFutureReservations(userId) {
     if (!userId) return 0;
 
     try {
       const todayStr = new Date().toISOString().split("T")[0];
 
+      // נשתמש בסט כדי לא לספור פעמיים אותו תאריך+שעה במקרה קצה
+      const seenKeys = new Set();
+      let count = 0;
+
+      // --- חלק 1: appointments (approved + pending, isHead, עתידיים) ---
       const qApps = query(
         collection(db, "appointments"),
         where("userId", "==", userId),
         where("date", ">=", todayStr)
       );
 
-      const snap = await getDocs(qApps);
-      let count = 0;
+      const appsSnap = await getDocs(qApps);
 
-      snap.forEach((docSnap) => {
+      appsSnap.forEach((docSnap) => {
         const a = docSnap.data() || {};
         const status = a.status || "pending";
 
-        // נספור רק תורים פעילים: pending / approved
         if (status !== "pending" && status !== "approved") return;
-
         if (!a.date || !a.hour) return;
         if (isAppointmentPast(a.date, a.hour)) return;
-
-        // נספור רק את השעה הראשונה של התור (isHead)
         if (!a.isHead) return;
 
+        const key = `${a.date}_${normalizeHour(a.hour)}`;
+        if (seenKeys.has(key)) return;
+
+        seenKeys.add(key);
+        count++;
+      });
+
+      // --- חלק 2: waitlists (כל מופע עתידי בתור שבו הלקוחה מופיעה) ---
+      const qWait = query(
+        collection(db, WAITLIST_COLLECTION),
+        where("userIds", "array-contains", userId),
+        where("date", ">=", todayStr)
+      );
+
+      const waitSnap = await getDocs(qWait);
+
+      waitSnap.forEach((docSnap) => {
+        const w = docSnap.data() || {};
+        const date = w.date || "";
+        const hour = normalizeHour(w.hour);
+
+        if (!date || !hour) return;
+        if (isAppointmentPast(date, hour)) return;
+
+        const queue = Array.isArray(w.queue) ? w.queue : [];
+        const inQueue = queue.some((x) => x?.userId === userId);
+        if (!inQueue) return;
+
+        const key = `${date}_${hour}`;
+        if (seenKeys.has(key)) return;
+
+        seenKeys.add(key);
         count++;
       });
 
@@ -910,12 +937,12 @@ export default function DayScreen({ route, navigation }) {
       return;
     }
 
-    // ✅ הגבלה ל־3 שריוני תור (תורים עתידיים במצב מאושר או ממתין לאישור)
+    // ✅ הגבלה ל־3 שריוני תור (תורים מאושרים, ממתינים לאישור ורשימות המתנה)
     const currentCount = await countActiveFutureReservations(userId);
     if (currentCount >= 3) {
       showAlert(
         "לא ניתן לקבוע תור",
-        "כבר יש לך 3 שריוני תור עתידיים (מאושרים או בממתינים לאישור).\nכדי לקבוע תור נוסף, עלייך לבטל תור קיים או תור שממתין לאישור."
+        "כבר יש לך 3 שריוני תור עתידיים (תורים מאושרים, תורים שממתינים לאישור או רשימות המתנה).\nכדי לקבוע תור נוסף, עלייך לבטל תור מאושר, לבטל בקשה ממתינה או להסיר את עצמך מרשימת המתנה."
       );
       return;
     }
@@ -994,8 +1021,6 @@ export default function DayScreen({ route, navigation }) {
 
     try {
       await runTransaction(db, async (tx) => {
-        // ❌ הורדנו את הבדיקה הישנה על userReservations שמנעה יותר מתור אחד
-
         const slotRefs = slots.map((h) =>
           doc(db, "appointments", makeAppointmentDocId(selectedDate, h))
         );
@@ -1372,7 +1397,6 @@ export default function DayScreen({ route, navigation }) {
                 const isMine = isReserved && app?.userId === userId;
                 const status = app?.status || null;
 
-                // ❗ אין יותר hasActiveReservation – הלקוחה יכולה לשריין עד 3, וההגבלה נעשית בתוך reserveHourWithServices
                 const canReserveBase =
                   !!userId &&
                   !isReserved &&
@@ -1426,7 +1450,7 @@ export default function DayScreen({ route, navigation }) {
 
                     if (holdForMe) {
                       waitPositionText =
-                        `✅ התור שמור עבורך למשך ${HOLD_MINUTES} דקות.\n` +
+                        `✅ התור שמור עבורך ${HOLD_MINUTES} דקות.\n` +
                         `המיקום שלך בתור: ${position}\n` +
                         "לחצי על 'קביעת תור' כדי לאשר ולקבל את התור.";
                     } else {

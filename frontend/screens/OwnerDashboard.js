@@ -28,6 +28,8 @@ import {
   orderBy,
   deleteDoc,
   setDoc,
+  getDocs,        // 👈 חדש
+  writeBatch,     // 👈 חדש
 } from "firebase/firestore";
 
 import { signOut } from "firebase/auth";
@@ -672,7 +674,6 @@ export default function OwnerDashboard({ navigation }) {
     return () => unsub();
   }, [selectedDate, showUsers]);
 
-  // ✅ תורים מאושרים לתאריך הנבחר
   // ✅ תורים מאושרים לתאריך הנבחר (מתוקן)
   useEffect(() => {
     if (showUsers) return;
@@ -701,16 +702,13 @@ export default function OwnerDashboard({ navigation }) {
 
             const status = a.status || null;
 
-            // סטטוסים שלא נחשבים לתור מאושר
             const isPendingOrCancelled =
               status === "pending" ||
               status === "cancelled" ||
               status === "rejected";
 
-            // כל מה שלא pending / cancelled / rejected = נחשב מאושר
             const isApproved = !isPendingOrCancelled;
 
-            // אם isHead לא קיים – נניח שהוא true כדי לא להפיל תורים ישנים
             const isHead =
               a.isHead === undefined ? true : a.isHead === true;
 
@@ -735,7 +733,7 @@ export default function OwnerDashboard({ navigation }) {
     );
 
     return () => unsub();
-  }, [selectedDate, showUsers]);;
+  }, [selectedDate, showUsers]);
 
   // busy days maps
   useEffect(() => {
@@ -1388,6 +1386,8 @@ export default function OwnerDashboard({ navigation }) {
               time: req.hour,
               businessName: "Rotem Studio Nails",
               servicesSelected: req.servicesSelected || [],
+
+
             });
           } else {
             console.log(
@@ -1629,6 +1629,127 @@ export default function OwnerDashboard({ navigation }) {
               showAlert("שגיאה", e?.message || "לא הצליח למחוק תור");
             }
           },
+        },
+      ]
+    );
+  }
+
+  // ===== מחיקת לקוחה + כל הדאטה שלה =====
+  async function deleteUserDataCompletely(user) {
+    const uid = user?.uid;
+    if (!uid) {
+      showAlert("שגיאה", "חסר מזהה משתמש למחיקה");
+      return;
+    }
+
+    try {
+      // 1. מחיקת כל התורים המאושרים / ממתינים של המשתמש
+      const appsSnap = await getDocs(
+        query(collection(db, "appointments"), where("userId", "==", uid))
+      );
+
+      const reqSnap = await getDocs(
+        query(
+          collection(db, "appointmentRequests"),
+          where("userId", "==", uid)
+        )
+      );
+
+      // 2. כל רשימות ההמתנה שבהן הלקוחה מופיעה
+      const waitlistsSnap = await getDocs(
+        query(
+          collection(db, WAITLIST_COLLECTION),
+          where("userIds", "array-contains", uid)
+        )
+      );
+
+      // 3. מחיקת מסמך המשתמש וה־userReservations בבאטצ׳ אחד
+      const batch = writeBatch(db);
+
+      appsSnap.forEach((d) => {
+        batch.delete(d.ref);
+      });
+
+      reqSnap.forEach((d) => {
+        batch.delete(d.ref);
+      });
+
+      const userResRef = doc(db, "userReservations", uid);
+      batch.delete(userResRef);
+
+      const userDocRef = doc(db, "users", uid);
+      batch.delete(userDocRef);
+
+      await batch.commit();
+
+      // 4. ניקוי רשימות המתנה
+      for (const wDoc of waitlistsSnap.docs) {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wDoc.ref);
+          if (!snap.exists()) return;
+
+          const data = snap.data() || {};
+          let queue = Array.isArray(data.queue) ? data.queue : [];
+          let userIds = Array.isArray(data.userIds) ? data.userIds : [];
+          let activeUserId = data.activeUserId || null;
+          let holdExpiresAtMs = data.holdExpiresAtMs || 0;
+
+          queue = queue.filter((item) => item && item.userId !== uid);
+          userIds = userIds.filter((id) => id !== uid);
+
+          // אם נשארו רשומות
+          if (!queue.length) {
+            tx.delete(wDoc.ref);
+            return;
+          }
+
+          if (activeUserId === uid) {
+            activeUserId = null;
+            holdExpiresAtMs = 0;
+          }
+
+          tx.update(wDoc.ref, {
+            queue,
+            userIds,
+            activeUserId,
+            holdExpiresAtMs,
+          });
+        });
+      }
+
+      // 5. עדכון סטייט מקומי
+      setAllUsers((prev) => prev.filter((u) => u.uid !== uid));
+      setAppointments((prev) => prev.filter((a) => a.userId !== uid));
+      setRequests((prev) => prev.filter((r) => r.userId !== uid));
+
+      showAlert(
+        "בוצע",
+        "הלקוחה וכל התורים / הבקשות / רשומות ההמתנה שלה נמחקו מהמערכת."
+      );
+
+      // ⚠️ מחיקת המשתמש מ-Firebase Auth (החשבון עצמו) צריכה להיעשות בצד שרת / Cloud Function.
+    } catch (e) {
+      console.log("❌ deleteUserDataCompletely error:", e);
+      showAlert("שגיאה", e?.message || "לא הצליח למחוק את הלקוחה");
+    }
+  }
+
+  function confirmDeleteUser(user) {
+    const fullName =
+      `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+      user.displayName ||
+      user.email ||
+      user.uid;
+
+    showAlert(
+      "מחיקת לקוחה",
+      `למחוק לצמיתות את הלקוחה "${fullName}" וכל המידע עליה?\n\nהפעולה בלתי הפיכה.`,
+      [
+        { text: "ביטול", style: "cancel" },
+        {
+          text: "מחק לצמיתות",
+          style: "destructive",
+          onPress: () => deleteUserDataCompletely(user),
         },
       ]
     );
@@ -1938,6 +2059,35 @@ export default function OwnerDashboard({ navigation }) {
                     >
                       סטטוס תקנון: {termsLabel}
                     </Text>
+
+                    {/* 👇 כפתור מחיקת לקוחה + כל הדאטה */}
+                    <Pressable
+                      onPress={() => confirmDeleteUser(u)}
+                      style={({ pressed }) => [
+                        {
+                          marginTop: 10,
+                          alignSelf: "flex-start",
+                          paddingVertical: 6,
+                          paddingHorizontal: 12,
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderColor: "#D6455D",
+                          opacity: pressed ? 0.85 : 1,
+                        },
+                        Platform.OS === "web"
+                          ? { cursor: "pointer" }
+                          : null,
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          color: "#D6455D",
+                          fontWeight: "900",
+                        }}
+                      >
+                        מחיקת לקוחה
+                      </Text>
+                    </Pressable>
                   </View>
                 );
               })
@@ -2028,19 +2178,6 @@ export default function OwnerDashboard({ navigation }) {
                 }}
               >
                 תאריך נבחר: {selectedDate}
-              </Text>
-
-              <Text
-                style={{
-                  marginTop: 6,
-                  fontSize: responsiveFont(13),
-                  textAlign: "center",
-                  color: "#444",
-                  fontWeight: "700",
-                }}
-              >
-                שעות לתאריך: {hoursForSelectedDate.length}{" "}
-                {availabilityExists ? "(מיוחד)" : "(ברירת מחדל)"}
               </Text>
 
               <Text
