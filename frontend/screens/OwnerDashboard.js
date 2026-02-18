@@ -93,6 +93,38 @@ function timeToMin(hhmm) {
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
+function minToTime(min) {
+  const h = String(Math.floor(min / 60)).padStart(2, "0");
+  const m = String(min % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function getSlotStepMin(hoursSorted) {
+  // הכי קטן בין שעות זמינות = גודל סלוט (לרוב 60)
+  if (!Array.isArray(hoursSorted) || hoursSorted.length < 2) return 60;
+
+  let best = Infinity;
+  for (let i = 1; i < hoursSorted.length; i++) {
+    const diff = timeToMin(hoursSorted[i]) - timeToMin(hoursSorted[i - 1]);
+    if (diff > 0 && diff < best) best = diff;
+  }
+  return Number.isFinite(best) && best !== Infinity ? best : 60;
+}
+
+function formatDuration(min) {
+  const total = Number(min) || 0;
+  if (total <= 0) return "0 דק׳";
+  if (total < 60) return `${total} דק׳`;
+
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+
+  const hoursText = hours === 1 ? "שעה" : `${hours} שעות`;
+  if (minutes === 0) return hoursText;
+
+  return `${hoursText} ו-${minutes} דק׳`;
+}
+
 function makeAppointmentDocId(date, hour) {
   const safeHour = (hour || "").replace(":", "-");
   return `${date}_${safeHour}`;
@@ -395,8 +427,13 @@ export default function OwnerDashboard({ navigation }) {
   const [manualHour, setManualHour] = useState("");
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
-  const [manualService, setManualService] = useState("");
   const [manualModalOpen, setManualModalOpen] = useState(false);
+
+// ✅ בחירת טיפולים כמו DayScreen
+const [manualSelectedServiceIds, setManualSelectedServiceIds] = useState({});
+
+const [waitlistsByHour, setWaitlistsByHour] = useState({});
+const [occupiedHours, setOccupiedHours] = useState(new Set());
 
   const [services, setServices] = useState([]);
   const [servicesInitial, setServicesInitial] = useState([]);
@@ -620,6 +657,20 @@ export default function OwnerDashboard({ navigation }) {
     if (availabilityExists) return availabilityHours;
     return defaultHours;
   }, [availabilityExists, availabilityHours, defaultHours]);
+  const manualSelectedServices = useMemo(() => {
+  const ids = Object.keys(manualSelectedServiceIds).filter(
+    (k) => manualSelectedServiceIds[k]
+  );
+
+  const chosen = (services || []).filter((s) => ids.includes(s.id));
+
+  const total = chosen.reduce((sum, s) => {
+    const n = Number(s?.durationMin || 0);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
+  return { chosen, total };
+}, [manualSelectedServiceIds, services]);
 
   // pending requests for selected date
   useEffect(() => {
@@ -674,66 +725,98 @@ export default function OwnerDashboard({ navigation }) {
     return () => unsub();
   }, [selectedDate, showUsers]);
 
-  // ✅ תורים מאושרים לתאריך הנבחר (מתוקן)
-  useEffect(() => {
-    if (showUsers) return;
+ useEffect(() => {
+  if (showUsers) return;
 
-    const qApps = query(
-      collection(db, "appointments"),
-      where("date", "==", selectedDate)
-    );
+  const qApps = query(
+    collection(db, "appointments"),
+    where("date", "==", selectedDate)
+  );
 
-    const unsub = onSnapshot(
-      qApps,
-      (snap) => {
-        const arr = snap.docs
-          .map((d) => {
-            const data = d.data() || {};
-            const hour = normalizeHour(data.hour);
+  const unsub = onSnapshot(
+    qApps,
+    (snap) => {
+      // 1) occupiedHours
+      const occ = new Set();
 
-            return {
-              docId: d.id,
-              ...data,
-              hour,
-            };
-          })
-          .filter((a) => {
-            if (!a.hour) return false;
+      // 2) approved appointments (רק ראשי)
+      const approvedHeads = [];
 
-            const status = a.status || null;
+      snap.docs.forEach((d) => {
+        const data = d.data() || {};
+        const hour = normalizeHour(data.hour);
+        if (!hour) return;
 
-            const isPendingOrCancelled =
-              status === "pending" ||
-              status === "cancelled" ||
-              status === "rejected";
+        // כל תור (pending/approved וגם סלוטים משניים) "תופס" את השעה
+        occ.add(hour);
 
-            const isApproved = !isPendingOrCancelled;
+        // תורים מאושרים בלבד
+        const status = data.status || null;
+        const isPendingOrCancelled =
+          status === "pending" ||
+          status === "cancelled" ||
+          status === "rejected";
 
-            const isHead =
-              a.isHead === undefined ? true : a.isHead === true;
+        const isApproved = !isPendingOrCancelled;
 
-            return isApproved && isHead;
-          })
-          .sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+        // רק head (ברירת מחדל true אם לא קיים)
+        const isHead = data.isHead === undefined ? true : data.isHead === true;
 
-        setAppointments(arr);
-      },
-      (err) => {
-        console.log(
-          "❌ approved appointments listen error:",
-          err?.code,
-          err?.message
-        );
-        showAlert(
-          "שגיאה בטעינת תורים מאושרים",
-          err?.message || "לא הצליח לטעון תורים מאושרים."
-        );
-        setAppointments([]);
-      }
-    );
+        if (isApproved && isHead) {
+          approvedHeads.push({
+            docId: d.id,
+            ...data,
+            hour,
+          });
+        }
+      });
 
-    return () => unsub();
-  }, [selectedDate, showUsers]);
+      approvedHeads.sort((a, b) => timeToMin(a.hour) - timeToMin(b.hour));
+
+      setOccupiedHours(occ);
+      setAppointments(approvedHeads);
+    },
+    (err) => {
+      console.log("❌ appointments/day listen error:", err?.code, err?.message);
+      setOccupiedHours(new Set());
+      setAppointments([]);
+      showAlert("שגיאה", err?.message || "לא הצליח לטעון תורים ליום הנבחר");
+    }
+  );
+
+  return () => unsub();
+}, [selectedDate, showUsers]);
+
+const freeHoursNoWaitlist = useMemo(() => {
+  const hours = Array.isArray(hoursForSelectedDate) ? hoursForSelectedDate : [];
+
+  const now = Date.now();
+
+  return hours
+    .map(normalizeHour)
+    .filter(Boolean)
+    .filter((h) => {
+      // לא בעבר
+      if (isAppointmentPast(selectedDate, h)) return false;
+
+      // לא תפוס בשום צורה (approved/pending/slots משניים)
+      if (occupiedHours.has(h)) return false;
+
+      // אין רשימת המתנה ואין hold
+      const w = waitlistsByHour?.[h] || null;
+      if (!w) return true;
+
+      const queueLen = Array.isArray(w.queue) ? w.queue.length : 0;
+      const hasHold =
+        !!w.activeUserId &&
+        !!w.holdExpiresAtMs &&
+        Number(w.holdExpiresAtMs) > now;
+
+      return queueLen === 0 && !hasHold;
+    })
+    .sort((a, b) => timeToMin(a) - timeToMin(b));
+}, [hoursForSelectedDate, selectedDate, occupiedHours, waitlistsByHour]);
+
 
   // busy days maps
   useEffect(() => {
@@ -1755,69 +1838,166 @@ export default function OwnerDashboard({ navigation }) {
     );
   }
 
-  async function ownerCreateManualAppointment() {
-    const hour = normalizeHour(manualHour);
-    const name = manualName.trim();
-    const phone = manualPhone.trim().replace(/[^\d]/g, "");
-    const serviceType = (manualService || "").trim();
+async function ownerCreateManualAppointment() {
+  const hour = normalizeHour(manualHour);
+  const name = manualName.trim();
+  const phone = manualPhone.trim().replace(/[^\d]/g, "");
 
-    if (!hour || !name || !phone) {
-      showAlert("שגיאה", "מלאי שעה, שם וטלפון");
+  const chosen = manualSelectedServices.chosen;
+  const totalDurationMin = manualSelectedServices.total;
+
+  if (!hour || !name || !phone) {
+    showAlert("שגיאה", "מלאי שעה, שם וטלפון");
+    return;
+  }
+  if (phone.length < 9) {
+    showAlert("שגיאה", "מספר טלפון לא תקין");
+    return;
+  }
+  if (!chosen.length || totalDurationMin <= 0) {
+    showAlert("שגיאה", "בחרי לפחות טיפול אחד");
+    return;
+  }
+
+  // שעות זמינות לאותו יום (ברירת מחדל / override)
+  const hoursSorted = (hoursForSelectedDate || [])
+    .map(normalizeHour)
+    .filter(Boolean)
+    .sort((a, b) => timeToMin(a) - timeToMin(b));
+
+  if (hoursSorted.length > 0 && !hoursSorted.includes(hour)) {
+    showAlert("שגיאה", "השעה הזו לא מוגדרת כזמינה בתאריך הזה");
+    return;
+  }
+
+  const startIdx = hoursSorted.indexOf(hour);
+  if (startIdx < 0) {
+    showAlert("שגיאה", "השעה לא קיימת ברשימת הזמינות");
+    return;
+  }
+
+  const stepMin = getSlotStepMin(hoursSorted);
+  const requiredSlots = Math.ceil(totalDurationMin / stepMin);
+
+  const slots = [];
+  for (let i = 0; i < requiredSlots; i++) {
+    const h = hoursSorted[startIdx + i];
+
+    if (!h) {
+      showAlert(
+        "אין מספיק זמן",
+        "אין מספיק זמן רציף לטיפול ביום הזה. בחרי שעה אחרת או קיצור טיפול."
+      );
       return;
     }
-    if (phone.length < 9) {
-      showAlert("שגיאה", "מספר טלפון לא תקין");
+
+    if (i > 0) {
+      const prev = hoursSorted[startIdx + i - 1];
+      if (timeToMin(h) - timeToMin(prev) !== stepMin) {
+        showAlert(
+          "אין רצף זמין",
+          "השעות ביום הזה לא רציפות מספיק לטיפול שבחרת. בחרי שעה אחרת."
+        );
+        return;
+      }
+    }
+
+    if (isAppointmentPast(selectedDate, h)) {
+      showAlert("לא ניתן", "חלק מהזמן שנדרש כבר עבר.");
       return;
     }
 
-    if (
-      hoursForSelectedDate.length > 0 &&
-      !hoursForSelectedDate.includes(hour)
-    ) {
-      showAlert("שגיאה", "השעה הזו לא מוגדרת כזמינה בתאריך הזה");
-      return;
-    }
+    slots.push(h);
+  }
 
-    const appId = makeAppointmentDocId(selectedDate, hour);
-    const appointmentRef = doc(db, "appointments", appId);
+  const groupId = makeAppointmentDocId(selectedDate, hour);
 
-    try {
-      await runTransaction(db, async (tx) => {
-        const existing = await tx.get(appointmentRef);
-        if (existing.exists())
-          throw new Error("התור בשעה הזו כבר תפוס");
+  const servicesSelected = chosen.map((s) => ({
+    id: s.id,
+    name: s.name,
+    durationMin: Number(s.durationMin) || 0,
+  }));
 
-        tx.set(appointmentRef, {
+  // startAt (כמו ב-DayScreen)
+  const [y, m, d] = selectedDate.split("-").map(Number);
+  const [sh, sm] = hour.split(":").map(Number);
+  const startAtDate = new Date(
+    y,
+    (m || 1) - 1,
+    d || 1,
+    sh || 0,
+    sm || 0,
+    0,
+    0
+  );
+
+  try {
+    await runTransaction(db, async (tx) => {
+      // לוודא שכל הסלוטים פנויים
+      const slotRefs = slots.map((h) =>
+        doc(db, "appointments", makeAppointmentDocId(selectedDate, h))
+      );
+
+      const slotSnaps = [];
+      for (const r of slotRefs) slotSnaps.push(await tx.get(r));
+
+      for (let i = 0; i < slotSnaps.length; i++) {
+        if (slotSnaps[i].exists()) {
+          throw new Error(`השעה ${slots[i]} כבר תפוסה`);
+        }
+      }
+
+      // ליצור "תור מאושר" לכל סלוט
+      for (let i = 0; i < slots.length; i++) {
+        const h = slots[i];
+        const ref = doc(db, "appointments", makeAppointmentDocId(selectedDate, h));
+
+        tx.set(ref, {
           date: selectedDate,
-          hour,
+          hour: h,
+
+          // ✅ שריון ידני: אין משתמש
           userId: null,
           customerName: name,
           customerPhone: phone,
-          serviceType: serviceType || null,
-
-          groupId: null,
-          isHead: true,
-          slots: [hour],
 
           status: "approved",
           approvedAt: serverTimestamp(),
           approvedBy: auth.currentUser?.uid || null,
           createdAt: serverTimestamp(),
           source: "owner_manual",
-        });
-      });
 
-      showAlert("בוצע", `התור נשמר ל-${name} בשעה ${hour}`);
-      setManualHour("");
-      setManualName("");
-      setManualPhone("");
-      setManualService("");
-      Keyboard.dismiss();
-      setManualModalOpen(false);
-    } catch (e) {
-      showAlert("שגיאה", e?.message || "לא הצליח לשריין תור");
-    }
+          // ✅ קבוצת סלוטים כמו DayScreen
+          groupId,
+          isHead: i === 0,
+          headHour: hour,
+          slots,
+
+          servicesSelected,
+          totalDurationMin,
+          startAt: startAtDate,
+        });
+      }
+    });
+
+    const endTime = minToTime(timeToMin(hour) + totalDurationMin);
+
+    showAlert(
+      "בוצע",
+      `התור נשמר ל-${name}\nהתחלה ${hour} • סיום משוער ${endTime}\nנתפסו: ${slots.join(", ")}`
+    );
+
+    // איפוס
+    setManualHour("");
+    setManualName("");
+    setManualPhone("");
+    setManualSelectedServiceIds({});
+    Keyboard.dismiss();
+    setManualModalOpen(false);
+  } catch (e) {
+    showAlert("שגיאה", e?.message || "לא הצליח לשריין תור");
   }
+}
 
   const MenuItem = ({ text, danger, onPress }) => (
     <Pressable
@@ -2316,6 +2496,8 @@ export default function OwnerDashboard({ navigation }) {
                   <MenuItem
                     text="עריכת טיפולים"
                     onPress={() => {
+                      Keyboard.dismiss();
+                      setManualHour("");
                       setMenuOpen(false);
                       Keyboard.dismiss();
                       setServicesModalOpen(true);
@@ -3205,20 +3387,57 @@ export default function OwnerDashboard({ navigation }) {
                     שריון ידני (מאושר)
                   </Text>
 
-                  <TextInput
-                    value={manualHour}
-                    onChangeText={setManualHour}
-                    placeholder="שעה (לדוגמה 15:00)"
-                    placeholderTextColor="#777"
-                    style={[
-                      globalStyles.input,
-                      {
-                        marginTop: 10,
+                  <View style={{ marginTop: 10 }}>
+                    <Text
+                      style={{
                         textAlign: "right",
-                        writingDirection: "ltr",
-                      },
-                    ]}
-                  />
+                        fontWeight: "900",
+                        color: colors.textDark,
+                        marginBottom: 6,
+                      }}
+                    >
+                      בחרי שעה פנויה:
+                    </Text>
+
+                    {freeHoursNoWaitlist.length === 0 ? (
+                      <Text style={{ textAlign: "right", color: "gray" }}>
+                        אין שעות פנויות ליום הזה.
+                      </Text>
+                    ) : (
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+                        {freeHoursNoWaitlist.map((h) => {
+                          const selected = manualHour === h;
+                          return (
+                            <Pressable
+                              key={h}
+                              onPress={() => setManualHour(h)}
+                              style={({ pressed }) => [
+                                {
+                                  paddingVertical: 10,
+                                  paddingHorizontal: 14,
+                                  borderRadius: 999,
+                                  backgroundColor: selected ? colors.primary : "#fff",
+                                  borderWidth: 1,
+                                  borderColor: colors.primary,
+                                  opacity: pressed ? 0.85 : 1,
+                                },
+                                Platform.OS === "web" ? { cursor: "pointer" } : null,
+                              ]}
+                            >
+                              <Text
+                                style={{
+                                  fontWeight: "900",
+                                  color: selected ? "#fff" : colors.primary,
+                                }}
+                              >
+                                {h}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
 
                   <TextInput
                     value={manualName}
@@ -3258,20 +3477,70 @@ export default function OwnerDashboard({ navigation }) {
                     ]}
                   />
 
-                  <TextInput
-                    value={manualService}
-                    onChangeText={setManualService}
-                    placeholder="סוג טיפול (אופציונלי)"
-                    placeholderTextColor="#777"
-                    style={[
-                      globalStyles.input,
-                      {
-                        marginTop: 8,
+                  <View style={{ marginTop: 10 }}>
+                    <Text
+                      style={{
                         textAlign: "right",
-                        writingDirection: "rtl",
-                      },
-                    ]}
-                  />
+                        fontWeight: "900",
+                        color: colors.textDark,
+                        marginBottom: 6,
+                      }}
+                    >
+                      בחרי טיפול/ים:
+                    </Text>
+
+                    <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled">
+                      {(services || []).map((s, idx) => {
+                        const checked = !!manualSelectedServiceIds[s.id];
+                        return (
+                          <Pressable
+                            key={`${s.id}_${idx}`}
+                            onPress={() =>
+                              setManualSelectedServiceIds((prev) => ({
+                                ...prev,
+                                [s.id]: !prev[s.id],
+                              }))
+                            }
+                            style={({ pressed }) => [
+                              {
+                                paddingVertical: 12,
+                                paddingHorizontal: 12,
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: checked ? colors.primary : "#ddd",
+                                marginBottom: 10,
+                                opacity: pressed ? 0.85 : 1,
+                                flexDirection: "row",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                backgroundColor: "#fff",
+                              },
+                              Platform.OS === "web" ? { cursor: "pointer" } : null,
+                            ]}
+                          >
+                            <Text style={{ fontWeight: "900" }}>
+                              {checked ? "✓ " : ""}
+                              {s.name}
+                            </Text>
+                            <Text style={{ fontWeight: "800", color: "#555" }}>
+                              {formatDuration(Number(s.durationMin) || 0)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+
+                    <Text
+                      style={{
+                        textAlign: "center",
+                        fontWeight: "900",
+                        marginTop: 4,
+                        color: "#333",
+                      }}
+                    >
+                      סה״כ זמן: {formatDuration(manualSelectedServices.total)}
+                    </Text>
+                  </View>
 
                   {Platform.OS === "android" &&
                   phoneFocused &&
@@ -3470,6 +3739,8 @@ export default function OwnerDashboard({ navigation }) {
           </View>
         </View>
 
+      
+
         {/* Pending requests */}
         <View style={{ marginBottom: 14 }}>
           <Text
@@ -3616,7 +3887,7 @@ export default function OwnerDashboard({ navigation }) {
             })
           )}
         </View>
-
+        
         {/* Approved appointments */}
         <View style={{ marginBottom: 8 }}>
           <Text
