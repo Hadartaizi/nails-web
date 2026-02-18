@@ -43,10 +43,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // ✅ יצירת תור:
-      //   • חייב להיות מחובר
-      //   • userId במסמך חייב להיות ה־uid של המשתמש
+      //   • משתמש רגיל יכול ליצור רק אם userId במסמך שווה ל-uid שלו
+      //   • בעלת המערכת יכולה ליצור גם תור ידני (userId יכול להיות null)
       allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid;
+        && (
+          isOwner()
+          || request.resource.data.userId == request.auth.uid
+        );
 
       // ✅ מחיקת תור – ע"י מי שיצר את התור (userId) או בעלת המערכת
       allow delete: if isSignedIn()
