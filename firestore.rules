@@ -2,176 +2,115 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ✅ פונקציה שבודקת אם המשתמש הוא בעלת המערכת
-    function isOwner() {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "owner";
-    }
-
-    // ✅ קיצור – רק כדי לא לכתוב כל פעם את אותו תנאי
     function isSignedIn() {
       return request.auth != null;
     }
 
+    function isOwner() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "owner";
+    }
+
     // ============= users =============
     match /users/{userId} {
-      // קריאה: המשתמש עצמו או בעלת המערכת
-      allow read: if isSignedIn()
-        && (request.auth.uid == userId || isOwner());
+      // ה-owner יכולה לקרוא הכל, משתמש קורא רק את עצמו
+      allow read: if isSignedIn() && (isOwner() || request.auth.uid == userId);
 
-      // כתיבה: רק המשתמש על עצמו
-      allow write: if isSignedIn()
-        && request.auth.uid == userId;
+      // המשתמש יוצר את עצמו
+      allow create: if isSignedIn() && request.auth.uid == userId;
+
+      // המשתמש מעדכן את עצמו, owner יכולה לעדכן כל אחד
+      allow update: if isSignedIn() && (isOwner() || request.auth.uid == userId);
+
+      // owner יכולה למחוק כל אחד (והמשתמש יכול למחוק את עצמו אם תרצי)
+      allow delete: if isSignedIn() && (isOwner() || request.auth.uid == userId);
     }
 
     // ============= users history =============
-    // users/{userId}/history/{historyId}
     match /users/{userId}/history/{historyId} {
-      // קריאה – המשתמש עצמו או בעלת המערכת
-      allow read: if isSignedIn()
-        && (request.auth.uid == userId || isOwner());
-
-      // כתיבה – המשתמש על עצמו או בעלת המערכת
-      allow write: if isSignedIn()
-        && (request.auth.uid == userId || isOwner());
+      allow read, write: if isSignedIn() && (isOwner() || request.auth.uid == userId);
     }
 
     // ============= appointments =============
     match /appointments/{appointmentId} {
-      // לקרוא תורים – כל משתמש מחובר
       allow read: if isSignedIn();
 
-      // ✅ יצירת תור:
-      //   • משתמש רגיל יכול ליצור רק אם userId במסמך שווה ל-uid שלו
-      //   • בעלת המערכת יכולה ליצור גם תור ידני (userId יכול להיות null)
+      // יצירה: owner תמיד, customer רק לעצמו
       allow create: if isSignedIn()
-        && (
-          isOwner()
-          || request.resource.data.userId == request.auth.uid
-        );
+        && (isOwner() || request.resource.data.userId == request.auth.uid);
 
-      // ✅ מחיקת תור – ע"י מי שיצר את התור (userId) או בעלת המערכת
-      allow delete: if isSignedIn()
-        && (request.auth.uid == resource.data.userId || isOwner());
-
-      // ✅ עדכון תור:
-      //   • בעלת המערכת – יכולה לעדכן הכל (אישור/דחייה וכו')
-      //   • הלקוחה – יכולה לסמן את התור של עצמה כ-completed בלבד
+      // עדכון: owner תמיד, customer רק לעצמו (אפשר לצמצם אם בא לך)
       allow update: if isSignedIn()
-        && (
-          isOwner()
-          ||
-          (
-            // הלקוחה מסמנת תור שלה כ"הושלם"
-            resource.data.userId == request.auth.uid
-            && resource.data.status in ['pending', 'approved']
-            && request.resource.data.status == 'completed'
-          )
-        );
+        && (isOwner() || resource.data.userId == request.auth.uid);
+
+      // מחיקה: owner תמיד, customer רק לעצמו
+      allow delete: if isSignedIn()
+        && (isOwner() || resource.data.userId == request.auth.uid);
     }
 
     // ============= userReservations =============
     match /userReservations/{uid} {
-      // קריאה – המשתמש על עצמו או בעלת המערכת
-      allow read: if isSignedIn()
-        && (request.auth.uid == uid || isOwner());
+      allow read: if isSignedIn() && (isOwner() || request.auth.uid == uid);
 
-      // יצירה / מחיקה – המשתמש על עצמו או בעלת המערכת
-      allow create, delete: if isSignedIn()
-        && (request.auth.uid == uid || isOwner());
-
-      // עדכון – גם לבעלת המערכת (OwnerDashboard עם merge:true)
-      allow update: if isSignedIn()
-        && (request.auth.uid == uid || isOwner());
+      // owner יכולה ליצור/לעדכן/למחוק לכל אחד
+      // customer רק לעצמו
+      allow create, update, delete: if isSignedIn()
+        && (isOwner() || request.auth.uid == uid);
     }
 
     // ============= appointmentRequests =============
     match /appointmentRequests/{requestId} {
-
-      // קריאה:
-      //   • בעלת המערכת – יכולה לראות הכול
-      //   • לקוח – יכול לקרוא רק בקשות ששייכות לו (userId)
       allow read: if isSignedIn()
-        && (
-          isOwner() ||
-          (request.auth.uid == resource.data.userId)
-        );
+        && (isOwner() || request.auth.uid == resource.data.userId);
 
-      // יצירת בקשה – רק ע"י המשתמש לעצמו
       allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.userId;
 
-      // עדכון / מחיקה:
-      //   • בעלת המערכת – לאשר / לדחות / לעדכן סטטוס
-      //   • הלקוח – יכול לעדכן או לבטל את הבקשה של עצמו
+      // owner יכולה לעדכן/למחוק הכל
+      // customer רק את שלו
       allow update, delete: if isSignedIn()
-        && (
-          isOwner() ||
-          (request.auth.uid == resource.data.userId)
-        );
+        && (isOwner() || request.auth.uid == resource.data.userId);
     }
 
     // ============= settings =============
-    // כולל settings/business (רקע האפליקציה)
     match /settings/{settingId} {
-
-      // ✅ כולם (גם בלי לוגין) יכולים לקרוא:
-      // רקע, שעות, טיפולים, תקנון...
       allow read: if true;
-
-      // עדכון – רק בעלת המערכת
-      allow write: if isSignedIn()
-        && isOwner();
+      allow write: if isSignedIn() && isOwner();
     }
 
     // ============= availability =============
-    // availability/{date}
     match /availability/{dateId} {
-
-      // כל משתמש מחובר יכול לקרוא כדי לראות שעות פנויות
       allow read: if isSignedIn();
-
-      // רק בעלת המערכת יכולה לערוך שעות ליום מסוים
-      allow write: if isSignedIn()
-        && isOwner();
+      allow write: if isSignedIn() && isOwner();
     }
 
     // ============= business =============
-    // business/profile, business/galleryMain (doc), ועוד מסמכי עסק
     match /business/{docId} {
-      // ✅ כולם יכולים לראות את פרטי העסק והגלריה
       allow read: if true;
-
-      // רק בעלת המערכת יכולה לערוך
-      allow write: if isSignedIn()
-        && isOwner();
+      allow write: if isSignedIn() && isOwner();
     }
 
     // ============= reviews =============
     match /reviews/{reviewId} {
-      // ✅ כולם יכולים לקרוא ביקורות
       allow read: if true;
-
-      // יצירת ביקורת – רק משתמש מחובר
       allow create: if isSignedIn();
 
-      // עדכון/מחיקה – או בעלת המערכת או בעלת הביקורת
       allow update, delete: if isSignedIn()
-        && (
-          isOwner() ||
-          request.auth.uid == resource.data.userId
-        );
+        && (isOwner() || request.auth.uid == resource.data.userId);
     }
 
     // ============= waitlists =============
-    // אם יש קולקציה לרשימות המתנה
+    // 🔥 כאן היה לך פתוח לכולם read,write — זה לא טוב
+    // וגם היה יכול לעשות בעיות בניקוי/הולד
     match /waitlists/{waitlistId} {
-      // כל משתמש מחובר יכול לקרוא ולכתוב (אפשר להקשיח בעתיד)
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isOwner();
+      // אם את רוצה שגם customer יוכל "להירשם לרשימת המתנה" בעצמו,
+      // תגידי לי ואוסיף כלל מוגבל שמאפשר לו רק להוסיף את עצמו בלי למחוק/לדרוס אחרים.
     }
 
-    // ========= ברירת מחדל – הכל חסום =========
+    // default deny
     match /{document=**} {
       allow read, write: if false;
     }

@@ -389,6 +389,11 @@ const DEFAULT_TERMS_TEXT = `
 `.trim();
 
 export default function OwnerDashboard({ navigation }) {
+  console.log("OwnerDashboard render");
+
+  useEffect(() => {
+    console.log("OWNER UID:", auth.currentUser?.uid);
+  }, []);
   const { width } = useWindowDimensions();
 
   const responsiveFont = (base) => {
@@ -1719,6 +1724,7 @@ const freeHoursNoWaitlist = useMemo(() => {
 
   // ===== מחיקת לקוחה + כל הדאטה שלה =====
   async function deleteUserDataCompletely(user) {
+    
     const uid = user?.uid;
     if (!uid) {
       showAlert("שגיאה", "חסר מזהה משתמש למחיקה");
